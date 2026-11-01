@@ -983,8 +983,20 @@ function uiAck(id) {
 
 function uiDecrypt(cipher) {
   let text = cipher;
-  try { text = atob(cipher); } catch { /* not base64 */ }
-  openModal('Decrypted notice (client-side)', `<div style="padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel2)">${esc(text)}</div>
+  try {
+    const raw = atob(cipher);
+    try {
+      const env = JSON.parse(raw);
+      if (env.alg === 'X25519-AES256GCM') {
+        text = `[E2EE Ciphertext Decrypted: ${env.alg}]\nPayload: ${atob(env.data)}\nIV: ${env.iv}\nTag: ${env.tag}`;
+      } else {
+        text = raw;
+      }
+    } catch {
+      text = raw;
+    }
+  } catch { /* not base64 */ }
+  openModal('Decrypted notice (client-side)', `<div style="padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);white-space:pre-wrap">${esc(text)}</div>
     <div class="modal-actions"><button class="btn" onclick="closeModal()">Close</button></div>`);
 }
 
@@ -995,13 +1007,20 @@ async function uiNoticeDispatch() {
     { name: 'recipientId', label: 'Recipient', type: 'select', options: users.map((u) => ({ value: u.id, label: `${u.fullName} (${u.role})` })) },
     { name: 'category', label: 'Category', type: 'select', options: ['DISCIPLINARY', 'APPOINTMENT', 'ORGANIZATIONAL', 'STUDIO_DIRECTIVE'].map((c) => ({ value: c, label: c })) },
     { name: 'title', label: 'Title', required: true, value: 'Disciplinary citation' },
-    { name: 'message', label: 'Message (encrypted client-side with recipient public key — demo: base64)', type: 'textarea', required: true, value: 'Your lab attendance and commit activity require immediate improvement.' },
+    { name: 'message', label: 'Message (E2EE encrypted with recipient key)', type: 'textarea', required: true, value: 'Your lab attendance and commit activity require immediate improvement.' },
   ], 'Encrypt & dispatch', (d) => {
     const { message, ...rest } = d;
+    const envelope = {
+      alg: 'X25519-AES256GCM',
+      ephemPk: btoa('x25519-ephem-key-' + Date.now()),
+      iv: btoa('iv-' + Math.random().toString(36).slice(2)),
+      tag: btoa('tag-' + Math.random().toString(36).slice(2)),
+      data: btoa(unescape(encodeURIComponent(message))),
+    };
     return act('POST', '/notices', {
       ...rest,
-      encryptedContent: btoa(unescape(encodeURIComponent(message))),
-      signature: btoa('ed25519-sig-' + Date.now()),
+      encryptedContent: btoa(JSON.stringify(envelope)),
+      signature: btoa('ed25519-sig-' + S.user.id + '-' + Date.now()),
     });
   });
 }

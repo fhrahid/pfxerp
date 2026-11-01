@@ -16,11 +16,17 @@ import '../src/env';
 import { PrismaClient, AccountType, UserRole, SquadRole, CertificationType } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { randomBytes } from 'crypto';
+import { E2EEUtil } from '../src/common/crypto/e2ee.util';
 
 const prisma = new PrismaClient();
 
 async function upsertUser(data: { email: string; fullName: string; role: UserRole; studentId?: string; password: string }) {
   const passwordHash = await bcrypt.hash(data.password, 12);
+  const keys = E2EEUtil.generateUserKeys();
+  const publicKey = JSON.stringify({
+    ed25519: keys.signing.publicKey,
+    x25519: keys.exchange.publicKey,
+  });
   const user = await prisma.user.upsert({
     where: { email: data.email },
     update: {},
@@ -30,6 +36,7 @@ async function upsertUser(data: { email: string; fullName: string; role: UserRol
       fullName: data.fullName,
       role: data.role,
       studentId: data.studentId ?? null,
+      publicKey,
       isActive: true,
     },
   });
@@ -174,6 +181,23 @@ export async function runDemoSeed() {
       });
     }
   }
+
+  // Seed demo product for Squad 1
+  const squad1 = await prisma.squad.findUnique({ where: { name: 'Squad 1' } });
+  if (squad1) {
+    await prisma.product.upsert({
+      where: { apiKey: 'pfx_demo_squad_1_key' },
+      update: {},
+      create: {
+        squadId: squad1.id,
+        name: 'Squad 1 Flagship SaaS',
+        liveUrl: 'https://squad1.pointfex.dev',
+        apiKey: 'pfx_demo_squad_1_key',
+        isClientProduct: false,
+      },
+    });
+  }
+
   console.log(`Demo dataset ready: execs + 6 squads (PM + 4 devs each), member password: ${MEMBER_PASSWORD}`);
 }
 
