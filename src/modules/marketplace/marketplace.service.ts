@@ -3,6 +3,7 @@ import { CertificationType, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { CertificationsService } from '../certifications/certifications.service';
+import { DashboardService } from '../dashboard/dashboard.service';
 import { AuthUser } from '../../common/types';
 import { AppException } from '../../common/exceptions/app.exception';
 
@@ -17,6 +18,7 @@ export class MarketplaceService {
     private readonly prisma: PrismaService,
     private readonly ledger: LedgerService,
     private readonly certs: CertificationsService,
+    private readonly dashboard: DashboardService,
   ) {}
 
   async createListing(user: AuthUser, dto: { title: string; description?: string; price: number; repositoryUrl?: string }) {
@@ -84,6 +86,16 @@ export class MarketplaceService {
       where: { listingId_buyerSquadId: { listingId, buyerSquadId } },
     });
     if (existing) throw new AppException('CONFLICT', 'Squad already licensed this asset (BR-CTO-36)');
+
+    const squad = await this.prisma.squad.findUnique({ where: { id: buyerSquadId } });
+    if (!squad) throw new NotFoundException('Buyer squad not found');
+    if (squad.healthStatus === 'BANKRUPT_RISK') {
+      throw new ForbiddenException('BANKRUPT_RISK: Squad treasury is frozen for non-essential marketplace purchases (BR-CFO-11)');
+    }
+    const tech = await this.dashboard.computeSquadTechScore(buyerSquadId, squad.name);
+    if (tech.tier === 'Tier F') {
+      throw new ForbiddenException('Tier F Tech Score: marketplace purchases are frozen for this squad (cto.md §1.2)');
+    }
 
     const amount = Number(listing.price);
     const treasury = await this.ledger.squadTreasury(buyerSquadId);

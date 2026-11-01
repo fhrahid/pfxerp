@@ -30,19 +30,28 @@ export class AuditService {
 
     const fineAmount = await this.settings.getNumber('CODE_AUDIT_FINE', 2000);
     const ctoCut = await this.settings.getNumber('CTO_AUDIT_FINE_CUT', 1000);
-    const reserveCut = Math.round((fineAmount - ctoCut) * 100) / 100;
-    if (fineAmount - ctoCut < 0) throw new BadRequestException('CODE_AUDIT_FINE must exceed CTO_AUDIT_FINE_CUT');
+    const cfoRate = await this.settings.getNumber('CFO_PENALTY_INCENTIVE', 0.20);
+    const cfoUser = await this.prisma.user.findFirst({ where: { role: 'CFO', isActive: true } });
+    const cfoCut = cfoUser ? Math.round(fineAmount * cfoRate * 100) / 100 : 0;
+    const reserveCut = Math.round((fineAmount - ctoCut - cfoCut) * 100) / 100;
+    if (fineAmount - ctoCut - cfoCut < 0) throw new BadRequestException('CODE_AUDIT_FINE must cover CTO and CFO cuts');
 
     const squadAcc = await this.ledger.squadTreasury(dto.squadId);
     const ctoAcc = await this.ledger.personalWallet(ctoUserId);
     const reserveAcc = await this.ledger.systemReserve();
 
+    const entries: { accountId: string; direction: 'DEBIT' | 'CREDIT'; amount: number }[] = [
+      { accountId: squadAcc.id, direction: 'DEBIT', amount: fineAmount },
+      { accountId: ctoAcc.id, direction: 'CREDIT', amount: ctoCut },
+    ];
+    if (cfoCut > 0 && cfoUser) {
+      const cfoAcc = await this.ledger.personalWallet(cfoUser.id);
+      entries.push({ accountId: cfoAcc.id, direction: 'CREDIT', amount: cfoCut });
+    }
+    entries.push({ accountId: reserveAcc.id, direction: 'CREDIT', amount: reserveCut });
+
     const tx = await this.ledger.postTransaction({
-      entries: [
-        { accountId: squadAcc.id, direction: 'DEBIT', amount: fineAmount },
-        { accountId: ctoAcc.id, direction: 'CREDIT', amount: ctoCut },
-        { accountId: reserveAcc.id, direction: 'CREDIT', amount: reserveCut },
-      ],
+      entries,
       referenceType: 'CODE_AUDIT_FINE',
       referenceId: dto.taskId,
       description: `Code Audit Citation (${dto.type}) — ${dto.description.slice(0, 120)}`,
@@ -77,7 +86,7 @@ export class AuditService {
       fineAmount,
     });
 
-    return { ...citation, transactionId: tx.id, systemReserveCut: reserveCut };
+    return { ...citation, transactionId: tx.id, systemReserveCut: reserveCut, cfoCut };
   }
 
   async listCitations(filters: { squadId?: string; type?: string; page: number; limit: number }) {
@@ -116,19 +125,31 @@ export class AuditService {
     if (!citation) throw new NotFoundException('Citation not found');
 
     const amount = await this.settings.getNumber('REVERSE_AUDIT_FINE', 4000);
+    const cfoRate = await this.settings.getNumber('CFO_PENALTY_INCENTIVE', 0.20);
+    const cfoUser = await this.prisma.user.findFirst({ where: { role: 'CFO', isActive: true } });
+    const cfoCut = cfoUser ? Math.round(amount * cfoRate * 100) / 100 : 0;
+    const reserveCut = Math.round((amount - cfoCut) * 100) / 100;
+
     const ctoAcc = await this.ledger.personalWallet(citation.citedById);
     const reserveAcc = await this.ledger.systemReserve();
 
-    const tx = await this.ledger.executeDoubleEntryTransfer({
-      senderAccountId: ctoAcc.id,
-      recipientAccountId: reserveAcc.id,
-      amount,
+    const entries: { accountId: string; direction: 'DEBIT' | 'CREDIT'; amount: number }[] = [
+      { accountId: ctoAcc.id, direction: 'DEBIT', amount },
+    ];
+    if (cfoCut > 0 && cfoUser) {
+      const cfoAcc = await this.ledger.personalWallet(cfoUser.id);
+      entries.push({ accountId: cfoAcc.id, direction: 'CREDIT', amount: cfoCut });
+    }
+    entries.push({ accountId: reserveAcc.id, direction: 'CREDIT', amount: reserveCut });
+
+    const tx = await this.ledger.postTransaction({
+      entries,
       referenceType: 'FINE',
       referenceId: citation.id,
       description: `CEO reverse audit penalty: ${reason.slice(0, 120)}`,
       idempotencyKey: idempotencyKey || `reverse_${citation.id}`,
       authorizedById: ceoUserId,
-      allowNegative: true, // wallet may go negative; future earnings garnished (cto.md §14.5)
+      allowNegativeAccountIds: new Set([ctoAcc.id]),
     });
 
     await this.prisma.executiveAuditLog.create({
@@ -141,6 +162,6 @@ export class AuditService {
       },
     });
 
-    return { citationId, penaltyAmount: amount, transactionId: tx.id, creditedTo: 'SYSTEM_RESERVE' };
+    return { citationId, penaltyAmount: amount, transactionId: tx.id, creditedTo: 'SYSTEM_RESERVE', cfoCut };
   }
 }
