@@ -24,6 +24,12 @@ export class DashboardController {
     return this.dashboard.ctoDashboard();
   }
 
+  /** API-CTO-25: squad tech scores leaderboard. */
+  @Get('cto/squad-tech-scores')
+  squadTechScores() {
+    return this.dashboard.squadTechScores();
+  }
+
   @Get('dashboard/cfo')
   @Roles(UserRole.CFO, UserRole.CEO)
   cfo() {

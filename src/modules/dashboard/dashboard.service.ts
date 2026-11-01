@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
+import { EventsGateway } from '../../events/events.gateway';
 
 /**
  * Aggregated dashboards (ceo.md §2, other.md §4) + the Simulation Stock Exchange
@@ -12,6 +13,7 @@ export class DashboardService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly settings: SettingsService,
+    private readonly events: EventsGateway,
   ) {}
 
   /** Recognized client revenue credited to a squad treasury (ESCROW_RELEASE credits). */
@@ -35,11 +37,31 @@ export class DashboardService {
     return Number(agg._sum.totalDue || 0);
   }
 
-  /** Valuation = treasury + 1.5 x recognized revenue - active debt (other.md §4.1). */
+  /** Squad MAU & API volume across products over the trailing 30 days (other.md §4.1). */
+  private async squadUsageMetrics(squadId: string): Promise<{ mau: number; apiInvocations: number }> {
+    const products = await this.prisma.product.findMany({ where: { squadId }, select: { id: true } });
+    if (!products.length) return { mau: 0, apiInvocations: 0 };
+    const productIds = products.map((p) => p.id);
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const agg = await this.prisma.productTelemetryHourly.aggregate({
+      where: { productId: { in: productIds }, recordedHour: { gte: thirtyDaysAgo } },
+      _sum: { activeUsers: true, apiRequests: true },
+    });
+    return {
+      mau: Number(agg._sum.activeUsers || 0),
+      apiInvocations: Number(agg._sum.apiRequests || 0),
+    };
+  }
+
+  /** Valuation = treasury + 1.5 x recognized revenue + (MAU x beta) + (API x alpha) - active debt (other.md §4.1). */
   private async computeValuation(squadId: string, treasuryBalance: number, treasuryAccountId: string) {
     const revenue = await this.recognizedRevenue(treasuryAccountId);
     const debt = await this.activeDebt(squadId);
-    return treasuryBalance + revenue * 1.5 - debt;
+    const usage = await this.squadUsageMetrics(squadId);
+    const beta = await this.settings.getNumber('VALUATION_MAU_BETA', 100);
+    const alpha = await this.settings.getNumber('VALUATION_API_ALPHA', 0.05);
+    const usageLift = (usage.mau * beta) + (usage.apiInvocations * alpha);
+    return treasuryBalance + revenue * 1.5 + usageLift - debt;
   }
 
   private healthFor(runway: number): 'BULLISH' | 'STABLE' | 'BANKRUPT_RISK' {
@@ -56,29 +78,40 @@ export class DashboardService {
       include: { account: true, borrowedLoans: { where: { status: 'ACTIVE', repaidAt: null } } },
     });
 
-    const results = [];
-    for (const squad of squads) {
-      const balance = squad.account ? Number(squad.account.balance) : 0;
-      const valuation = await this.computeValuation(squad.id, balance, squad.account?.id ?? '');
-      const runway = burn > 0 ? balance / burn : 0;
-      const health = this.healthFor(runway);
+    return Promise.all(
+      squads.map(async (squad) => {
+        const balance = squad.account ? Number(squad.account.balance) : 0;
+        const valuation = await this.computeValuation(squad.id, balance, squad.account?.id ?? '');
+        const runway = burn > 0 ? balance / burn : 0;
+        const health = this.healthFor(runway);
 
-      await this.prisma.squad.update({
-        where: { id: squad.id },
-        data: { valuation: new Prisma.Decimal(valuation.toFixed(2)), healthStatus: health },
-      });
+        if (health === 'BANKRUPT_RISK' && squad.healthStatus !== 'BANKRUPT_RISK') {
+          this.events.emitToStudio('health:alert', {
+            squadId: squad.id,
+            metric: 'runway',
+            status: 'BANKRUPT_RISK',
+            currentRunway: Math.round(runway * 10) / 10,
+          });
+        }
 
-      results.push({
-        id: squad.id,
-        name: squad.name,
-        balance,
-        valuation,
-        runwayPeriods: Math.round(runway * 10) / 10,
-        health,
-        activeDebt: squad.borrowedLoans.reduce((a, l) => a + Number(l.totalDue), 0),
-      });
-    }
-    return results;
+        if (Number(squad.valuation) !== Math.round(valuation * 100) / 100 || squad.healthStatus !== health) {
+          await this.prisma.squad.update({
+            where: { id: squad.id },
+            data: { valuation: new Prisma.Decimal(valuation.toFixed(2)), healthStatus: health },
+          });
+        }
+
+        return {
+          id: squad.id,
+          name: squad.name,
+          balance,
+          valuation,
+          runwayPeriods: Math.round(runway * 10) / 10,
+          health,
+          activeDebt: squad.borrowedLoans.reduce((a, l) => a + Number(l.totalDue), 0),
+        };
+      }),
+    );
   }
 
   /** API-CEO-01: 360 command center. */
@@ -162,12 +195,83 @@ export class DashboardService {
     };
   }
 
+  async squadTechScores() {
+    const squads = await this.prisma.squad.findMany({ where: { isActive: true }, select: { id: true, name: true } });
+    const results = await Promise.all(squads.map((s) => this.computeSquadTechScore(s.id, s.name)));
+    return results.sort((a, b) => b.score - a.score);
+  }
+
+  async computeSquadTechScore(squadId: string, squadName?: string) {
+    if (!squadName) {
+      const s = await this.prisma.squad.findUnique({ where: { id: squadId } });
+      squadName = s?.name || squadId;
+    }
+
+    const [citationsCount, criticalBugs, majorBugs, minorBugs, verifiedTasks, rejectedTasks] = await Promise.all([
+      this.prisma.codeAuditCitation.count({ where: { squadId } }),
+      this.prisma.bugReport.count({ where: { targetSquadId: squadId, status: 'CTO_VERIFIED', severity: 'CRITICAL' } }),
+      this.prisma.bugReport.count({ where: { targetSquadId: squadId, status: 'CTO_VERIFIED', severity: 'MAJOR' } }),
+      this.prisma.bugReport.count({ where: { targetSquadId: squadId, status: 'CTO_VERIFIED', severity: 'MINOR' } }),
+      this.prisma.task.count({ where: { squadId, status: { in: ['CTO_VERIFIED', 'CLOSED'] } } }),
+      this.prisma.task.count({ where: { squadId, ctoQualityPassed: false } }),
+    ]);
+
+    const totalAudited = verifiedTasks + rejectedTasks;
+    const passRate = totalAudited > 0 ? verifiedTasks / totalAudited : 1.0;
+
+    let score = 100 - citationsCount * 10 - criticalBugs * 15 - majorBugs * 8 - minorBugs * 3;
+    if (totalAudited > 0) {
+      score += Math.round(passRate * 20) - 10;
+    }
+    score = Math.max(0, Math.min(100, Math.round(score)));
+
+    let tier: 'Tier S' | 'Tier A' | 'Tier B' | 'Tier C' | 'Tier F';
+    let multiplier: number;
+    let consequences: string;
+
+    if (score >= 90) {
+      tier = 'Tier S';
+      multiplier = 1.25;
+      consequences = 'Priority marketplace listing display; +15% squad seed funding bonus';
+    } else if (score >= 75) {
+      tier = 'Tier A';
+      multiplier = 1.0;
+      consequences = 'Standard operational clearance; full consultancy access';
+    } else if (score >= 60) {
+      tier = 'Tier B';
+      multiplier = 0.85;
+      consequences = 'Mandatory CTO architectural audit on all PRs; -10% equity grant cut';
+    } else if (score >= 40) {
+      tier = 'Tier C';
+      multiplier = 0.6;
+      consequences = 'Squad treasury blocked from dividend payouts; weekly audit fines doubled';
+    } else {
+      tier = 'Tier F';
+      multiplier = 0.25;
+      consequences = 'Squad feature freeze; marketplace purchases and consultancy bookings frozen';
+    }
+
+    return {
+      squadId,
+      squadName,
+      score,
+      tier,
+      multiplier,
+      consequences,
+      citationsCount,
+      criticalBugs,
+      majorBugs,
+      taskPassRate: Math.round(passRate * 100) / 100,
+    };
+  }
+
   async ctoDashboard() {
-    const [pendingTasks, pendingCerts, citationsAgg, bountyAgg] = await Promise.all([
+    const [pendingTasks, pendingCerts, citationsAgg, bountyAgg, techScores] = await Promise.all([
       this.prisma.task.count({ where: { status: 'PM_VERIFIED' } }),
       this.prisma.ctoProviderCertification.count({ where: { reviewedById: null, qualityScore: null } }),
       this.prisma.codeAuditCitation.aggregate({ _sum: { fineAmount: true }, _count: true }),
       this.prisma.bugReport.aggregate({ where: { status: 'SUBMITTED' }, _count: true }),
+      this.squadTechScores(),
     ]);
     return {
       pendingTaskVerifications: pendingTasks,
@@ -175,6 +279,7 @@ export class DashboardService {
       totalAuditFinesLevied: Number(citationsAgg._sum.fineAmount || 0),
       activeCitations: citationsAgg._count,
       bugReportsAwaitingTriage: bountyAgg._count,
+      techScores,
     };
   }
 
