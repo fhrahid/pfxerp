@@ -350,13 +350,15 @@ await test('BR-CHRO-09: batch disbursement math (treasury −total, wallets +amo
   eq(treasury(1), b.s1 - 2000, 'treasury');
   eq(wallet('dev1_2@pointfex.dev'), b.d12 + 2000, 'dev wallet');
 });
-await test('BR-CHRO-16..19: slacker fine 2000 → 500 CPO + 1500 reserve (wallet then squad fallback)', async () => {
-  const b = { w: wallet('dev1_4@pointfex.dev'), s1: treasury(1), cpo: wallet('cpo@pointfex.dev'), r: reserve() };
+await test('BR-CHRO-16..19: slacker fine 2000 → 500 CPO + 400 CFO + 1100 reserve (wallet then squad fallback)', async () => {
+  const b = { w: wallet('dev1_4@pointfex.dev'), s1: treasury(1), cpo: wallet('cpo@pointfex.dev'), cfo: wallet('cfo@pointfex.dev'), r: reserve() };
   const r = await api(cpo.token, 'POST', '/fines/slacker', { targetUserId: userId('dev1_4@pointfex.dev'), targetSquadId: squadId(1), reason: 'Zero commits and missed standup lab 5' }, { 'X-Idempotency-Key': idem() });
   eq(r.fineAmount, 2000, 'fine');
   eq(r.cpoBounty, 500, 'cpo cut');
+  eq(r.cfoCommission, 400, 'cfo cut');
   eq(wallet('cpo@pointfex.dev'), b.cpo + 500, 'cpo wallet');
-  eq(reserve(), b.r + 1500, 'reserve');
+  eq(wallet('cfo@pointfex.dev'), b.cfo + 400, 'cfo wallet');
+  eq(reserve(), b.r + 1100, 'reserve');
   eq(wallet('dev1_4@pointfex.dev') + treasury(1), b.w + b.s1 - 2000, 'combined debit');
 });
 
@@ -535,21 +537,23 @@ await test('BR-CFO-14: investment moves CFO wallet → squad treasury', async ()
 
 /* ============================================================= CODE AUDIT (cto.md §3) */
 section('CODE AUDIT — cto.md BR-CTO-01..07');
-await test('BR-CTO-02..04: citation fine split (squad −2000, CTO +1000, reserve +1000)', async () => {
-  const b = { s5: treasury(5), cto: wallet('cto@pointfex.dev'), r: reserve() };
+await test('BR-CTO-02..04: citation fine split (squad −2000, CTO +1000, CFO +400, reserve +600)', async () => {
+  const b = { s5: treasury(5), cto: wallet('cto@pointfex.dev'), cfo: wallet('cfo@pointfex.dev'), r: reserve() };
   const c = await api(cto.token, 'POST', '/cto/citations', { squadId: squadId(5), type: 'SECURITY_VULNERABILITY', description: 'SQL injection in raw query UserRepository line 42' }, { 'X-Idempotency-Key': idem() });
   eq(Number(c.fineAmount), 2000, 'fine');
   eq(Number(c.ctoCut), 1000, 'cut');
   eq(treasury(5), b.s5 - 2000, 'squad');
   eq(wallet('cto@pointfex.dev'), b.cto + 1000, 'cto');
-  eq(reserve(), b.r + 1000, 'reserve');
+  eq(wallet('cfo@pointfex.dev'), b.cfo + 400, 'cfo');
+  eq(reserve(), b.r + 600, 'reserve');
   globalThis.citationId = c.id;
 });
-await test('BR-CTO-05: CEO reverse penalty 4000 (CTO wallet → reserve)', async () => {
-  const b = { cto: wallet('cto@pointfex.dev'), r: reserve() };
+await test('BR-CTO-05: CEO reverse penalty 4000 (CTO wallet → CFO 800 + reserve 3200)', async () => {
+  const b = { cto: wallet('cto@pointfex.dev'), cfo: wallet('cfo@pointfex.dev'), r: reserve() };
   await api(ceo.token, 'POST', `/cto/citations/${globalThis.citationId}/reverse-penalty`, { reason: 'Gross oversight: passed unauthenticated admin endpoint leading to breach.' }, { 'X-Idempotency-Key': idem() });
   eq(wallet('cto@pointfex.dev'), b.cto - 4000, 'cto debited');
-  eq(reserve(), b.r + 4000, 'reserve credited');
+  eq(wallet('cfo@pointfex.dev'), b.cfo + 800, 'cfo wallet');
+  eq(reserve(), b.r + 3200, 'reserve credited');
 });
 await test('BR-CTO-06: description ≥15 chars enforced', async () => {
   await expectStatus(cto.token, 'POST', '/cto/citations', { squadId: squadId(5), type: 'CODE_SMELL', description: 'too short' }, 400, 'short description');
@@ -820,6 +824,36 @@ await test('BR §4.2: simulation score = 50% normalized valuation + 50% normaliz
 await test('BR §5 health: Squad 6 flagged BANKRUPT_RISK after default', async () => {
   const health = dbq(`SELECT "healthStatus" FROM "Squad" WHERE id='${squadId(6)}'`);
   assert(health === 'BANKRUPT_RISK', `got ${health}`);
+});
+await test('BR-CFO-11: BANKRUPT_RISK locks marketplace purchases and consultancy bookings', async () => {
+  const listings = await api(pm6.token, 'GET', '/marketplace/listings');
+  if (listings.length > 0) {
+    await expectStatus(pm6.token, 'POST', `/marketplace/listings/${listings[0].id}/purchase`, { buyerSquadId: squadId(6) }, 403, 'bankrupt marketplace purchase');
+  }
+  const consultant = userId('cto@pointfex.dev');
+  await expectStatus(pm6.token, 'POST', '/cto/consultancy/bookings', { consultantId: consultant, clientSquadId: squadId(6), scheduledAt: new Date(Date.now() + 86400000).toISOString() }, 403, 'bankrupt consultancy booking');
+});
+
+/* ============================================================= TELEMETRY & TECH SCORES */
+section('TELEMETRY & TECH SCORES');
+await test('API-OTH-01: Product creation, telemetry ingest and hourly rollup', async () => {
+  const prod = await api(pm1.token, 'POST', '/products', { squadId: squadId(1), name: 'Squad 1 Production API', liveUrl: 'https://s1.pointfex.dev' });
+  assert(prod.id && prod.apiKey, 'product creation failed');
+  const ingestRes = await api('', 'POST', '/telemetry/ingest', {
+    events: [
+      { type: 'page_view', path: '/', latencyMs: 50, statusCode: 200, userId: 'user-a' },
+      { type: 'api_call', path: '/api/v1/ping', latencyMs: 20, statusCode: 200, userId: 'user-b' },
+      { type: 'api_call', path: '/api/v1/error', latencyMs: 500, statusCode: 500, userId: 'user-c' },
+    ],
+  }, { 'X-API-Key': prod.apiKey });
+  assert(ingestRes.bufferedCount === 3, 'bufferedCount mismatch');
+  const records = await api(pm1.token, 'GET', `/products/${prod.id}/telemetry`);
+  assert(records.length > 0 && records[0].pageviews >= 1, 'telemetry hourly rollup missing');
+});
+await test('API-CTO-25: Squad Tech Scores Leaderboard', async () => {
+  const scores = await api(cto.token, 'GET', '/cto/squad-tech-scores');
+  assert(Array.isArray(scores) && scores.length === 6, 'expected 6 squad tech scores');
+  assert(scores[0].tier && scores[0].multiplier, 'tech score metadata missing');
 });
 
 /* ============================================================= SETTINGS */

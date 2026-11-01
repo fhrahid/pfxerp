@@ -29,6 +29,7 @@ import { MarketplaceModule } from './modules/marketplace/marketplace.module';
 import { ConsultancyModule } from './modules/consultancy/consultancy.module';
 import { ClientsModule } from './modules/clients/clients.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { TelemetryModule } from './modules/telemetry/telemetry.module';
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
     ConsultancyModule,
     ClientsModule,
     DashboardModule,
+    TelemetryModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },
