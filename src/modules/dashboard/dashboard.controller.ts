@@ -1,0 +1,43 @@
+import { Controller, Get } from '@nestjs/common';
+import { UserRole } from '@prisma/client';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Roles, CurrentUser } from '../../common/decorators';
+import { AuthUser } from '../../common/types';
+import { DashboardService } from './dashboard.service';
+
+@ApiTags('dashboard')
+@ApiBearerAuth()
+@Controller()
+export class DashboardController {
+  constructor(private readonly dashboard: DashboardService) {}
+
+  /** API-CEO-01. */
+  @Get('dashboard/ceo')
+  @Roles(UserRole.CEO)
+  ceo() {
+    return this.dashboard.ceoDashboard();
+  }
+
+  @Get('dashboard/cto')
+  @Roles(UserRole.CTO, UserRole.CEO)
+  cto() {
+    return this.dashboard.ctoDashboard();
+  }
+
+  @Get('dashboard/cfo')
+  @Roles(UserRole.CFO, UserRole.CEO)
+  cfo() {
+    return this.dashboard.cfoDashboard();
+  }
+
+  @Get('dashboard/me')
+  me(@CurrentUser() user: AuthUser) {
+    return this.dashboard.meDashboard(user);
+  }
+
+  /** API-OTH-02: studio simulation leaderboard. */
+  @Get('simulation-scores')
+  leaderboard() {
+    return this.dashboard.leaderboard();
+  }
+}

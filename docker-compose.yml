@@ -1,0 +1,46 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pointfex-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: pointfex_db
+      POSTGRES_USER: pointfex_admin
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-pointfex_dev_password}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    networks:
+      - pointfex-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pointfex_admin -d pointfex_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pointfex-api
+    restart: always
+    environment:
+      DATABASE_URL: "postgresql://pointfex_admin:${DB_PASSWORD:-pointfex_dev_password}@postgres:5432/pointfex_db?schema=public&connection_limit=25"
+      JWT_SECRET: ${JWT_SECRET:-dev_jwt_secret_change_me}
+      LEDGER_SECRET_KEY: ${LEDGER_SECRET_KEY:-dev_ledger_secret_change_me}
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - pointfex-internal
+
+volumes:
+  pgdata:
+
+networks:
+  pointfex-internal:
+    driver: bridge

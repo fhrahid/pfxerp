@@ -1,0 +1,933 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ==========================================
+// ENUMS
+// ==========================================
+
+enum UserRole {
+  CEO
+  CFO
+  CTO
+  CPO
+  PM
+  DEVELOPER
+}
+
+enum DeveloperTier {
+  TIER_A
+  TIER_B
+  TIER_C
+  TIER_D
+}
+
+enum SquadRole {
+  PM
+  DEVELOPER
+}
+
+enum AccountType {
+  SQUAD_TREASURY
+  PERSONAL_WALLET
+  SYSTEM_RESERVE
+  ESCROW
+}
+
+enum LedgerDirection {
+  DEBIT
+  CREDIT
+}
+
+enum TransactionType {
+  SPRINT_PAYOUT
+  TAX
+  PAYROLL
+  FINE
+  CONSULTANCY
+  BOUNTY
+  LOAN_DISBURSEMENT
+  LOAN_REPAYMENT
+  EQUITY_INVESTMENT
+  EQUITY_DIVIDEND
+  SWAP_FEE
+  MARKETPLACE_PURCHASE
+  ESCROW_DEPOSIT
+  ESCROW_RELEASE
+  CHAOS_PENALTY
+  CEO_BONUS
+  CODE_AUDIT_FINE
+  SLACKER_FINE
+}
+
+enum TaskStatus {
+  BACKLOG
+  TODO
+  IN_PROGRESS
+  FLAGGED_COMPLETE
+  PM_VERIFIED
+  CTO_VERIFIED
+  CLOSED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum PayrollProposalStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+enum PayrollTier {
+  STAR_PERFORMER
+  REGULAR
+  UNDERPERFORMER
+  SLACKER
+}
+
+enum LoanStatus {
+  ACTIVE
+  REPAID
+  DEFAULTED
+}
+
+enum BugSeverity {
+  CRITICAL
+  MAJOR
+  MINOR
+  LOW
+}
+
+enum BugReportStatus {
+  SUBMITTED
+  CTO_VERIFIED
+  REJECTED
+}
+
+enum NoticeCategory {
+  DISCIPLINARY
+  APPOINTMENT
+  ORGANIZATIONAL
+  STUDIO_DIRECTIVE
+}
+
+enum NoticeStatus {
+  DISPATCHED
+  DELIVERED
+  ACKNOWLEDGED
+}
+
+enum SquadHealthStatus {
+  BULLISH
+  STABLE
+  BANKRUPT_RISK
+}
+
+enum BoardDecisionStatus {
+  PROPOSED
+  APPROVED
+  REJECTED
+  CEO_APPROVED
+}
+
+enum DecisionCategory {
+  LOAN_APPROVAL
+  SWAP_REQUEST
+  POLICY_CHANGE
+  EMERGENCY_ACTION
+}
+
+enum DecisionVoteChoice {
+  APPROVE
+  REJECT
+}
+
+enum ChaosEventType {
+  SCOPE_CREEP
+  LEAD_DEV_SICK_LEAVE
+  SERVER_OUTAGE
+  CUSTOM
+}
+
+enum ContractType {
+  TIME_AND_MATERIALS
+  FIXED_BID
+  RETAINER
+}
+
+enum ContractStatus {
+  DRAFT
+  SIGNED
+  ACTIVE
+  COMPLETED
+  DISPUTED
+}
+
+enum MilestoneStatus {
+  PENDING
+  IN_PROGRESS
+  CTO_AUDIT
+  CLIENT_REVIEW
+  PAID
+}
+
+enum CertificationType {
+  CONSULTANT
+  MARKETPLACE_AUTHOR
+  SECURITY_RESEARCHER
+}
+
+enum CodeAuditCitationType {
+  CODE_SMELL
+  BAD_MERGE_REQUEST
+  SECURITY_VULNERABILITY
+}
+
+enum BookingStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+  FLAGGED_SUSPICIOUS
+}
+
+enum RiskSeverity {
+  INFO
+  WARNING
+  SUSPICIOUS
+  CRITICAL
+}
+
+// v1 addition: sprint payout lifecycle (BR-CFO-01..06)
+enum SprintPayoutStatus {
+  PROPOSED
+  APPROVED
+  EXECUTED
+}
+
+// ==========================================
+// MODELS
+// ==========================================
+
+model User {
+  id               String         @id @default(uuid())
+  email            String         @unique
+  passwordHash     String
+  fullName         String
+  studentId        String?        @unique
+  role             UserRole
+  tier             DeveloperTier?
+  isActive         Boolean        @default(true)
+  publicKey        String?        @db.Text
+  refreshTokenHash String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  // Relationships
+  account                 Account?
+  squadMemberships        SquadMembership[]
+  assignedTasks           Task[]                     @relation("TaskAssignee")
+  createdTasks            Task[]                     @relation("TaskCreator")
+  pmVerifiedTasks         Task[]                     @relation("TaskPmVerifier")
+  ctoVerifiedTasks        Task[]                     @relation("TaskCtoVerifier")
+  taskAuditEvents         TaskAuditEvent[]
+  payrollLineItems        PayrollLineItem[]
+  submittedPayrolls       PayrollProposal[]          @relation("PayrollSubmitter")
+  approvedPayrolls        PayrollProposal[]          @relation("PayrollApprover")
+  sentNotices             Notice[]                   @relation("NoticeSender")
+  receivedNotices         Notice[]                   @relation("NoticeRecipient")
+  equityStakes            EquityStake[]
+  authoredListings        MarketplaceListing[]       @relation("ListingAuthor")
+  marketplacePurchases    MarketplacePurchase[]      @relation("BuyerUser")
+  consultanciesAsExpert   ConsultancyBooking[]       @relation("ConsultantUser")
+  consultanciesBooked     ConsultancyBooking[]       @relation("ConsultancyBooker")
+  certifications          CtoProviderCertification[] @relation("CertifiedUser")
+  reviewedCertifications  CtoProviderCertification[] @relation("CertReviewer")
+  reportedBugs            BugReport[]                @relation("BugReporter")
+  verifiedBugs            BugReport[]                @relation("BugCtoVerifier")
+  codeCitationsIssued     CodeAuditCitation[]        @relation("CitationIssuer")
+  proposedDecisions       BoardDecision[]            @relation("DecisionProposer")
+  decisionVotes           DecisionVote[]
+  targetedChaosEvents     ChaosEvent[]               @relation("ChaosTargetUser")
+  triggeredChaosEvents    ChaosEvent[]               @relation("ChaosTriggerer")
+  authorizedTransactions  LedgerTransaction[]        @relation("TxAuthorizer")
+  executiveAuditLogs      ExecutiveAuditLog[]        @relation("AuditActor")
+  dpiSnapshots            DeveloperPerformanceSnapshot[]
+  pmhiSnapshots           PmPerformanceSnapshot[]
+}
+
+model Squad {
+  id              String            @id @default(uuid())
+  name            String            @unique
+  description     String?
+  isActive        Boolean           @default(true)
+  healthStatus    SquadHealthStatus @default(STABLE)
+  valuation       Decimal           @default(100000.00) @db.Decimal(14, 2)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  // Relationships
+  account                 Account?
+  memberships             SquadMembership[]
+  tasks                   Task[]
+  payrollProposals        PayrollProposal[]
+  borrowedLoans           Loan[]                     @relation("BorrowerSquad")
+  equityStakes            EquityStake[]
+  marketplacePurchases    MarketplacePurchase[]
+  consultanciesBooked     ConsultancyBooking[]
+  bountyTargets           BugBountyTarget[]          @relation("TargetSquad")
+  reportedBounties        BugReport[]                @relation("ReportingSquad")
+  targetedBounties        BugReport[]                @relation("TargetedSquad")
+  codeCitations           CodeAuditCitation[]
+  targetedChaosEvents     ChaosEvent[]               @relation("ChaosTargetSquad")
+  clientMilestones        ClientMilestone[]          @relation("AssignedSquad")
+  products                Product[]
+  healthSnapshots         SquadHealthSnapshot[]
+  sprintPayoutItems       SprintPayoutItem[]
+}
+
+model SquadMembership {
+  id          String    @id @default(uuid())
+  userId      String
+  squadId     String
+  role        SquadRole
+  allocation  Decimal   @default(1.0) @db.Decimal(3, 2) // 0.00 to 1.00
+  isPrimary   Boolean   @default(true)
+  joinedAt    DateTime  @default(now())
+  leftAt      DateTime?
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  squad       Squad     @relation(fields: [squadId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, squadId])
+  @@index([userId])
+  @@index([squadId])
+}
+
+model Account {
+  id        String      @id @default(uuid())
+  ownerId   String?     @unique // Populated if PERSONAL_WALLET
+  squadId   String?     @unique // Populated if SQUAD_TREASURY
+  type      AccountType
+  balance   Decimal     @default(0.00) @db.Decimal(14, 2)
+  currency  String      @default("BDT")
+  isFrozen  Boolean     @default(false)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  user          User?         @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  squad         Squad?        @relation(fields: [squadId], references: [id], onDelete: Cascade)
+  ledgerEntries LedgerEntry[]
+
+  @@index([type])
+}
+
+model LedgerTransaction {
+  id              String          @id @default(uuid())
+  idempotencyKey  String          @unique
+  referenceType   TransactionType
+  referenceId     String?
+  description     String?
+  authorizedById  String
+  createdAt       DateTime        @default(now())
+
+  authorizedBy    User            @relation("TxAuthorizer", fields: [authorizedById], references: [id])
+  entries         LedgerEntry[]
+
+  @@index([referenceType])
+  @@index([createdAt])
+}
+
+model LedgerEntry {
+  id              String          @id @default(uuid())
+  transactionId   String
+  accountId       String
+  direction       LedgerDirection
+  amount          Decimal         @db.Decimal(14, 2)
+  prevHash        String          @db.VarChar(64)
+  entryHash       String          @db.VarChar(64)
+  sequenceNumber  BigInt          @default(autoincrement())
+  createdAt       DateTime        @default(now())
+
+  transaction     LedgerTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  account         Account           @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@index([accountId])
+  @@index([sequenceNumber])
+}
+
+model Task {
+  id                    String        @id @default(uuid())
+  squadId               String
+  clientMilestoneId     String?
+  title                 String        @db.VarChar(255)
+  description           String?       @db.Text
+  storyPoints           Int           @default(1)
+  assignedToId          String?
+  assignedById          String?
+  status                TaskStatus    @default(BACKLOG)
+  priority              TaskPriority  @default(MEDIUM)
+  sprintNumber          Int?
+
+  // Verification Artifacts & Timestamps
+  gitPrUrl              String?       @db.Text
+  gitCommitHash         String?       @db.VarChar(64)
+  lastCommitTimestamp   DateTime?
+  flaggedCompleteAt     DateTime?
+
+  // PM Verification Gate
+  pmVerifiedById        String?
+  pmVerifiedAt          DateTime?
+  pmIsFlagPremature     Boolean       @default(false)
+  pmPenaltyPoints       Int           @default(0)
+  pmFeedback            String?       @db.Text
+
+  // CTO Technical Verification Gate
+  ctoVerifiedById       String?
+  ctoVerifiedAt         DateTime?
+  ctoQualityPassed      Boolean?
+  ctoFineLevied         Decimal       @default(0.00) @db.Decimal(10, 2)
+  ctoCritique           String?       @db.Text
+
+  dueDate               DateTime?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  squad                 Squad            @relation(fields: [squadId], references: [id], onDelete: Cascade)
+  clientMilestone       ClientMilestone? @relation(fields: [clientMilestoneId], references: [id], onDelete: SetNull)
+  assignedTo            User?            @relation("TaskAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  assignedBy            User?            @relation("TaskCreator", fields: [assignedById], references: [id], onDelete: SetNull)
+  pmVerifiedBy          User?            @relation("TaskPmVerifier", fields: [pmVerifiedById], references: [id], onDelete: SetNull)
+  ctoVerifiedBy         User?            @relation("TaskCtoVerifier", fields: [ctoVerifiedById], references: [id], onDelete: SetNull)
+
+  auditEvents           TaskAuditEvent[]
+  codeCitations         CodeAuditCitation[]
+
+  @@index([squadId])
+  @@index([assignedToId])
+  @@index([status])
+  @@index([sprintNumber])
+}
+
+model TaskAuditEvent {
+  id          String     @id @default(uuid())
+  taskId      String
+  changedById String
+  fromStatus  TaskStatus
+  toStatus    TaskStatus
+  comment     String?    @db.Text
+  createdAt   DateTime   @default(now())
+
+  task        Task       @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  changedBy   User       @relation(fields: [changedById], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+}
+
+model PayrollProposal {
+  id              String                @id @default(uuid())
+  squadId         String
+  labNumber       Int
+  sprintNumber    Int?
+  totalProposed   Decimal               @db.Decimal(10, 2)
+  status          PayrollProposalStatus @default(DRAFT)
+  submittedById   String?
+  approvedById    String?
+  rejectedReason  String?               @db.Text
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  squad           Squad                 @relation(fields: [squadId], references: [id], onDelete: Cascade)
+  submittedBy     User?                 @relation("PayrollSubmitter", fields: [submittedById], references: [id])
+  approvedBy      User?                 @relation("PayrollApprover", fields: [approvedById], references: [id])
+  lineItems       PayrollLineItem[]
+
+  @@unique([squadId, labNumber])
+  @@index([squadId])
+  @@index([status])
+}
+
+model PayrollLineItem {
+  id            String      @id @default(uuid())
+  proposalId    String
+  userId        String
+  tier          PayrollTier
+  amount        Decimal     @db.Decimal(10, 2)
+  justification String?     @db.Text
+
+  proposal      PayrollProposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  user          User            @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([proposalId, userId])
+  @@index([proposalId])
+}
+
+model Notice {
+  id                      String         @id @default(uuid())
+  senderId                String
+  recipientId             String
+  title                   String         @db.VarChar(255)
+  encryptedContent        String         @db.Text // Pre-encrypted client-side (zero-knowledge)
+  category                NoticeCategory
+  signature               String         @db.Text // Ed25519 signature of sender
+  status                  NoticeStatus   @default(DISPATCHED)
+  acknowledgedAt          DateTime?
+  acknowledgmentSignature String?        @db.Text
+  createdAt               DateTime       @default(now())
+
+  sender                  User           @relation("NoticeSender", fields: [senderId], references: [id])
+  recipient               User           @relation("NoticeRecipient", fields: [recipientId], references: [id])
+
+  @@index([recipientId])
+  @@index([status])
+}
+
+model Loan {
+  id              String      @id @default(uuid())
+  borrowerSquadId String
+  principalAmount Decimal     @db.Decimal(12, 2)
+  interestRate    Decimal     @default(0.15) @db.Decimal(4, 2)
+  interestAmount  Decimal     @db.Decimal(12, 2)
+  totalDue        Decimal     @db.Decimal(12, 2)
+  status          LoanStatus  @default(ACTIVE)
+  approvedById    String?
+  ceoApproved     Boolean     @default(false)
+  disbursedAt     DateTime?
+  dueDate         DateTime?
+  repaidAt        DateTime?
+  createdAt       DateTime    @default(now())
+
+  borrowerSquad   Squad       @relation("BorrowerSquad", fields: [borrowerSquadId], references: [id], onDelete: Cascade)
+
+  @@index([borrowerSquadId])
+  @@index([status])
+}
+
+model EquityStake {
+  id              String    @id @default(uuid())
+  investorId      String    // CFO user ID
+  squadId         String
+  stakePercent    Decimal   @default(0.10) @db.Decimal(4, 2)
+  investedAmount  Decimal   @db.Decimal(12, 2)
+  sprintNumber    Int
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+
+  investor        User      @relation(fields: [investorId], references: [id], onDelete: Cascade)
+  squad           Squad     @relation(fields: [squadId], references: [id], onDelete: Cascade)
+
+  @@index([investorId])
+  @@index([squadId])
+}
+
+model BugBountyTarget {
+  id                  String      @id @default(uuid())
+  title               String      @db.VarChar(255)
+  description         String?     @db.Text
+  targetSquadId       String
+  clientMilestoneId   String?
+  totalBountyPool     Decimal     @db.Decimal(12, 2)
+  remainingPool       Decimal     @db.Decimal(12, 2)
+  createdById         String
+  isActive            Boolean     @default(true)
+  createdAt           DateTime    @default(now())
+
+  targetSquad         Squad       @relation("TargetSquad", fields: [targetSquadId], references: [id], onDelete: Cascade)
+  reports             BugReport[]
+
+  @@index([targetSquadId])
+}
+
+model BugReport {
+  id                String          @id @default(uuid())
+  bountyTargetId    String?
+  reportingUserId   String
+  reportingSquadId  String
+  targetSquadId     String
+  title             String          @db.VarChar(255)
+  description       String          @db.Text
+  reproductionSteps String          @db.Text
+  severity          BugSeverity
+  bountyAmount      Decimal?        @db.Decimal(10, 2)
+  status            BugReportStatus @default(SUBMITTED)
+  verifiedByCtoId   String?
+  verifiedAt        DateTime?
+  rejectionReason   String?         @db.Text
+  sprintNumber      Int?
+  createdAt         DateTime        @default(now())
+
+  target            BugBountyTarget? @relation(fields: [bountyTargetId], references: [id], onDelete: SetNull)
+  reportingUser     User             @relation("BugReporter", fields: [reportingUserId], references: [id], onDelete: Restrict)
+  reportingSquad    Squad            @relation("ReportingSquad", fields: [reportingSquadId], references: [id], onDelete: Restrict)
+  targetSquad       Squad            @relation("TargetedSquad", fields: [targetSquadId], references: [id], onDelete: Restrict)
+  verifiedByCto     User?            @relation("BugCtoVerifier", fields: [verifiedByCtoId], references: [id], onDelete: SetNull)
+
+  @@index([targetSquadId])
+  @@index([reportingSquadId])
+  @@index([status])
+}
+
+model CodeAuditCitation {
+  id            String                @id @default(uuid())
+  squadId       String
+  citedById     String                // CTO
+  type          CodeAuditCitationType
+  description   String                @db.Text
+  fineAmount    Decimal               @default(2000.00) @db.Decimal(10, 2)
+  ctoCut        Decimal               @default(1000.00) @db.Decimal(10, 2)
+  taskId        String?
+  createdAt     DateTime              @default(now())
+
+  squad         Squad                 @relation(fields: [squadId], references: [id], onDelete: Cascade)
+  citedBy       User                  @relation("CitationIssuer", fields: [citedById], references: [id], onDelete: Restrict)
+  task          Task?                 @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@index([squadId])
+}
+
+model ConsultancyBooking {
+  id            String        @id @default(uuid())
+  consultantId  String        // CTO or certified consultant
+  clientSquadId String
+  bookedById    String        // PM or Dev
+  fee           Decimal       @default(4000.00) @db.Decimal(10, 2)
+  consultantCut Decimal       @default(2000.00) @db.Decimal(10, 2)
+  meetingNotes  String?       @db.Text
+  prLinks       String?       @db.Text
+  status        BookingStatus @default(SCHEDULED)
+  scheduledAt   DateTime
+  completedAt   DateTime?
+  createdAt     DateTime      @default(now())
+
+  consultant    User          @relation("ConsultantUser", fields: [consultantId], references: [id], onDelete: Restrict)
+  clientSquad   Squad         @relation(fields: [clientSquadId], references: [id], onDelete: Cascade)
+  bookedBy      User          @relation("ConsultancyBooker", fields: [bookedById], references: [id], onDelete: Restrict)
+
+  @@index([consultantId])
+  @@index([clientSquadId])
+}
+
+model MarketplaceListing {
+  id                       String    @id @default(uuid())
+  authorId                 String
+  title                    String    @db.VarChar(255)
+  description              String?   @db.Text
+  price                    Decimal   @db.Decimal(10, 2)
+  repositoryUrl            String?   @db.Text
+  isCtoVerified            Boolean   @default(false)
+  isDelisted               Boolean   @default(false) // v1 addition (BR-CTO-38)
+  verifiedById             String?
+  weeklySquadPurchaseLimit Int       @default(1)
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  author                   User                  @relation("ListingAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  purchases                MarketplacePurchase[]
+
+  @@index([authorId])
+}
+
+model MarketplacePurchase {
+  id            String             @id @default(uuid())
+  listingId     String
+  buyerSquadId  String
+  buyerUserId   String
+  amount        Decimal            @db.Decimal(10, 2)
+  createdAt     DateTime           @default(now())
+
+  listing       MarketplaceListing @relation(fields: [listingId], references: [id], onDelete: Restrict)
+  buyerSquad    Squad              @relation(fields: [buyerSquadId], references: [id], onDelete: Cascade)
+  buyerUser     User               @relation("BuyerUser", fields: [buyerUserId], references: [id], onDelete: Restrict)
+
+  @@unique([listingId, buyerSquadId]) // v1: DB-level single-purchase enforcement (BR-CTO-36)
+  @@index([listingId])
+  @@index([buyerSquadId])
+}
+
+model CtoProviderCertification {
+  id                String            @id @default(uuid())
+  userId            String
+  certificationType CertificationType
+  qualityScore      Int?              // 0 to 100
+  isPreapproved     Boolean           @default(false)
+  portfolioUrl      String?           @db.VarChar(512) // v1 addition
+  applicationNotes  String?           @db.Text         // v1 addition
+  ctoReviewNotes    String?           @db.Text         // v1 addition
+  reviewedById      String?
+  certifiedAt       DateTime?
+  expiresAt         DateTime?
+  cooldownUntil     DateTime?
+  createdAt         DateTime          @default(now())
+
+  user              User @relation("CertifiedUser", fields: [userId], references: [id], onDelete: Cascade)
+  reviewedBy        User? @relation("CertReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@unique([userId, certificationType])
+  @@index([userId])
+}
+
+model BoardDecision {
+  id           String               @id @default(uuid())
+  title        String               @db.VarChar(255)
+  description  String               @db.Text
+  proposedById String
+  category     DecisionCategory
+  status       BoardDecisionStatus  @default(PROPOSED)
+  ceoApproved  Boolean              @default(false)
+  ceoComment   String?              @db.Text
+  referenceId  String?              // v1 addition: links decision to target entity (e.g. loanId)
+  createdAt    DateTime             @default(now())
+  resolvedAt   DateTime?
+
+  proposedBy   User                 @relation("DecisionProposer", fields: [proposedById], references: [id], onDelete: Restrict)
+  votes        DecisionVote[]
+
+  @@index([status])
+}
+
+model DecisionVote {
+  id          String             @id @default(uuid())
+  decisionId  String
+  voterId     String
+  vote        DecisionVoteChoice
+  comment     String?            @db.Text
+  createdAt   DateTime           @default(now())
+
+  decision    BoardDecision      @relation(fields: [decisionId], references: [id], onDelete: Cascade)
+  voter       User               @relation(fields: [voterId], references: [id], onDelete: Cascade)
+
+  @@unique([decisionId, voterId])
+  @@index([decisionId])
+}
+
+model ChaosEvent {
+  id              String         @id @default(uuid())
+  type            ChaosEventType
+  title           String         @db.VarChar(255)
+  description     String         @db.Text
+  targetSquadId   String?
+  targetUserId    String?
+  penaltyAmount   Decimal?       @db.Decimal(10, 2)
+  triggeredById   String
+  penaltyDueAt    DateTime?      // v1 addition: auto-penalty deadline (BR-CEO-07.3)
+  penaltyAppliedAt DateTime?     // v1 addition: idempotent penalty marker
+  resolvedAt      DateTime?
+  resolution      String?        @db.Text
+  createdAt       DateTime       @default(now())
+
+  targetSquad     Squad?         @relation("ChaosTargetSquad", fields: [targetSquadId], references: [id], onDelete: SetNull)
+  targetUser      User?          @relation("ChaosTargetUser", fields: [targetUserId], references: [id], onDelete: SetNull)
+  triggeredBy     User           @relation("ChaosTriggerer", fields: [triggeredById], references: [id], onDelete: Restrict)
+
+  @@index([targetSquadId])
+  @@index([type])
+}
+
+model Client {
+  id                 String           @id @default(uuid())
+  companyName        String           @db.VarChar(255)
+  contactName        String?          @db.VarChar(255)
+  contactEmail       String           @unique @db.VarChar(255)
+  totalLifetimeValue Decimal          @default(0.00) @db.Decimal(14, 2)
+  createdAt          DateTime         @default(now())
+
+  contracts          ClientContract[]
+}
+
+model ClientContract {
+  id                    String          @id @default(uuid())
+  clientId              String
+  title                 String          @db.VarChar(255)
+  contractType          ContractType    @default(FIXED_BID)
+  totalValue            Decimal         @db.Decimal(14, 2)
+  escrowBalance         Decimal         @default(0.00) @db.Decimal(14, 2)
+  studioReservePercent  Decimal         @default(0.25) @db.Decimal(4, 2)
+  squadSharePercent     Decimal         @default(0.65) @db.Decimal(4, 2)
+  execOverheadPercent   Decimal         @default(0.10) @db.Decimal(4, 2)
+  status                ContractStatus  @default(DRAFT)
+  createdAt             DateTime        @default(now())
+
+  client                Client          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  milestones            ClientMilestone[]
+  products              Product[]
+
+  @@index([clientId])
+}
+
+model ClientMilestone {
+  id                String          @id @default(uuid())
+  contractId        String
+  assignedSquadId   String?
+  milestoneName     String          @db.VarChar(255)
+  payoutAmount      Decimal         @db.Decimal(14, 2)
+  dueDate           DateTime?
+  status            MilestoneStatus @default(PENDING)
+  ctoApproved       Boolean         @default(false)
+  clientAccepted    Boolean         @default(false)
+  createdAt         DateTime        @default(now())
+
+  contract          ClientContract  @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  assignedSquad     Squad?          @relation("AssignedSquad", fields: [assignedSquadId], references: [id], onDelete: SetNull)
+  tasks             Task[]
+
+  @@index([contractId])
+  @@index([assignedSquadId])
+}
+
+model Product {
+  id                String    @id @default(uuid())
+  squadId           String
+  name              String    @db.VarChar(255)
+  liveUrl           String?   @db.Text
+  apiKey            String    @unique @db.VarChar(128)
+  isClientProduct   Boolean   @default(false)
+  clientContractId  String?
+  createdAt         DateTime  @default(now())
+
+  squad             Squad     @relation(fields: [squadId], references: [id], onDelete: Cascade)
+  clientContract    ClientContract? @relation(fields: [clientContractId], references: [id], onDelete: SetNull)
+  telemetryHourly   ProductTelemetryHourly[]
+
+  @@index([squadId])
+}
+
+model ProductTelemetryHourly {
+  id              String   @id @default(uuid())
+  productId       String
+  recordedHour    DateTime
+  uniqueVisitors  Int      @default(0)
+  pageviews       Int      @default(0)
+  apiRequests     Int      @default(0)
+  activeUsers     Int      @default(0)
+  avgLatencyMs    Decimal  @default(0.00) @db.Decimal(8, 2)
+  errorCount5xx   Int      @default(0)
+  customEvents    Json?
+
+  product         Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, recordedHour])
+  @@index([productId])
+  @@index([recordedHour])
+}
+
+model DeveloperPerformanceSnapshot {
+  id                      String    @id @default(uuid())
+  userId                  String
+  sprintNumber            Int
+  dpiScore                Decimal   @db.Decimal(5, 2)
+  storyPointsAssigned     Int       @default(0)
+  storyPointsCompleted    Int       @default(0)
+  onTimeDeliveryRate      Decimal   @default(1.00) @db.Decimal(5, 2)
+  ctoQualityPassRate      Decimal   @default(1.00) @db.Decimal(5, 2)
+  prematureFlagsCount     Int       @default(0)
+  bugBountyContributions  Int       @default(0)
+  calculatedAt            DateTime  @default(now())
+
+  user                    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, sprintNumber])
+  @@index([userId])
+}
+
+model PmPerformanceSnapshot {
+  id                 String    @id @default(uuid())
+  userId             String
+  sprintNumber       Int
+  pmhiScore          Decimal   @db.Decimal(5, 2)
+  velocityAccuracy   Decimal   @default(0.00) @db.Decimal(5, 2)
+  ctoAgreementRate   Decimal   @default(1.00) @db.Decimal(5, 2)
+  onTimeDeliveryRate Decimal   @default(1.00) @db.Decimal(5, 2)
+  ctoOverrideCount   Int       @default(0)
+  calculatedAt       DateTime  @default(now())
+
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, sprintNumber])
+  @@index([userId])
+}
+
+model SquadHealthSnapshot {
+  id              String            @id @default(uuid())
+  squadId         String
+  sprintNumber    Int
+  bankBalance     Decimal           @db.Decimal(14, 2)
+  burnRate        Decimal           @db.Decimal(12, 2)
+  runwayPeriods   Decimal           @db.Decimal(6, 2)
+  healthStatus    SquadHealthStatus
+  valuation       Decimal           @db.Decimal(14, 2)
+  calculatedAt    DateTime          @default(now())
+
+  squad           Squad             @relation(fields: [squadId], references: [id], onDelete: Cascade)
+
+  @@unique([squadId, sprintNumber])
+  @@index([squadId])
+}
+
+// ==========================================
+// v1 ADDITIONS: Sprint Payout Engine (cfo.md)
+// ==========================================
+
+model SprintPayout {
+  id            String            @id @default(uuid())
+  sprintNumber  Int               @unique
+  totalPool     Decimal           @db.Decimal(12, 2)
+  status        SprintPayoutStatus @default(PROPOSED)
+  proposedById  String
+  approvedById  String?
+  executedAt    DateTime?
+  createdAt     DateTime          @default(now())
+
+  items         SprintPayoutItem[]
+}
+
+model SprintPayoutItem {
+  id             String  @id @default(uuid())
+  payoutId       String
+  squadId        String
+  rank           Int
+  grossAmount    Decimal @db.Decimal(12, 2)
+  taxAmount      Decimal @db.Decimal(12, 2)
+  netAmount      Decimal @db.Decimal(12, 2)
+  pmBonusAmount  Decimal @default(0.00) @db.Decimal(12, 2)
+
+  payout         SprintPayout @relation(fields: [payoutId], references: [id], onDelete: Cascade)
+  squad          Squad        @relation(fields: [squadId], references: [id], onDelete: Cascade)
+
+  @@unique([payoutId, squadId])
+  @@index([squadId])
+}
+
+model SystemSetting {
+  id        String   @id @default(uuid())
+  key       String   @unique @db.VarChar(100)
+  value     String   @db.Text
+  type      String   @default("STRING") // STRING, NUMBER, JSON, BOOLEAN
+  updatedAt DateTime @updatedAt
+}
+
+model ExecutiveAuditLog {
+  id                  String       @id @default(uuid())
+  executiveId         String
+  executiveRole       UserRole
+  actionType          String       @db.VarChar(100)
+  payloadSnapshot     Json
+  riskSeverity        RiskSeverity @default(INFO)
+  generatedReportUrl  String?      @db.Text
+  createdAt           DateTime     @default(now())
+
+  executive           User         @relation("AuditActor", fields: [executiveId], references: [id], onDelete: Cascade)
+
+  @@index([executiveRole])
+  @@index([riskSeverity])
+  @@index([createdAt])
+}
