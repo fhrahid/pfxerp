@@ -33,15 +33,20 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api/docs', app, document);
 
-  // AUTO_SEED=true: populate genesis state on first boot (e.g. fresh Dokploy deployment)
+  // AUTO_SEED=true: populate genesis state on first boot (e.g. fresh Dokploy deployment).
+  // Production-safe: only settings, system accounts and the CEO (from env) are created.
+  // Set SEED_DEMO=true as well if you also want the local demo dataset.
   if (process.env.AUTO_SEED === 'true') {
     try {
       const check = new PrismaClient();
       const users = await check.user.count();
       await check.$disconnect();
       if (users === 0) {
-        const { runSeed } = await import('../prisma/seed');
-        await runSeed();
+        const seed = await import('../prisma/seed');
+        await seed.runBootstrapSeed();
+        if (process.env.SEED_DEMO === 'true') {
+          await seed.runDemoSeed();
+        }
       }
     } catch (e) {
       console.warn('AUTO_SEED skipped:', (e as Error).message);

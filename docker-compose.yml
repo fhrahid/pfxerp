@@ -29,6 +29,8 @@ services:
       DATABASE_URL: "postgresql://pointfex_admin:${DB_PASSWORD:-pointfex_dev_password}@postgres:5432/pointfex_db?schema=public&connection_limit=25"
       JWT_SECRET: ${JWT_SECRET:-dev_jwt_secret_change_me}
       LEDGER_SECRET_KEY: ${LEDGER_SECRET_KEY:-dev_ledger_secret_change_me}
+      INITIAL_CEO_EMAIL: ${INITIAL_CEO_EMAIL:-noor@seu.edu.bd}
+      INITIAL_CEO_PASSWORD: ${INITIAL_CEO_PASSWORD:-PointfexCeo2026!}
       NODE_ENV: production
     ports:
       - "3000:3000"

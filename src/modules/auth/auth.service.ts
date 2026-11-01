@@ -69,7 +69,6 @@ export class AuthService {
         email: user.email,
         fullName: user.fullName,
         role: user.role,
-        tier: user.tier,
         squadIds: user.squadMemberships.map((m) => m.squadId),
         walletBalance: user.account ? Number(user.account.balance) : 0,
       },

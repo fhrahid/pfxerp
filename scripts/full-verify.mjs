@@ -830,6 +830,54 @@ await test('BR: CEO updates a setting; it takes effect (payroll budget 10000 →
   await api(ceo.token, 'PUT', '/settings', { key: 'WEEKLY_LAB_BUDGET', value: '10000', type: 'NUMBER' });
 });
 
+/* ============================================================= SQUAD & USER CRUD (chro.md §2.1) */
+section('CRUD — squad & profile management (CPO/CEO)');
+await test('CRUD: CPO creates a squad — treasury funded from reserve', async () => {
+  const b = { r: reserve() };
+  const squad = await api(cpo.token, 'POST', '/squads', { name: 'Squad Alpha', description: 'created via CRUD', initialBalance: 50000 });
+  eq(squad.balance, 50000, 'initial balance');
+  eq(reserve(), b.r - 50000, 'reserve funds the treasury');
+  globalThis.crudSquadId = squad.id;
+});
+await test('CRUD: rename + edit description + duplicate name blocked', async () => {
+  const updated = await api(cpo.token, 'PATCH', `/squads/${globalThis.crudSquadId}`, { name: 'Squad Alpha Prime', description: 'renamed' });
+  assert(updated.name === 'Squad Alpha Prime', 'rename failed');
+  const r = await raw('POST', '/squads', { name: 'Squad Alpha Prime' }, cpo.token);
+  assert(r.status === 409, `duplicate squad name got ${r.status}`);
+});
+await test('CRUD: PM cannot create squads (403)', async () => {
+  await expectStatus(pm1.token, 'POST', '/squads', { name: 'Rogue Squad' }, 403, 'pm create squad');
+});
+await test('CRUD: CPO creates a user — wallet auto-provisioned, login works', async () => {
+  const user = await api(cpo.token, 'POST', '/users', { email: 'ayesha@pointfex.dev', fullName: 'Ayesha Rahman', password: 'Pointfex-123', role: 'DEVELOPER', studentId: 'CSE900' });
+  const hasWallet = dbNum(`SELECT COUNT(*) FROM "Account" WHERE "ownerId"='${user.id}'`);
+  assert(hasWallet === 1, 'wallet not provisioned');
+  const session = await login('ayesha@pointfex.dev', 'Pointfex-123');
+  assert(session.user.role === 'DEVELOPER', 'new user cannot log in');
+  globalThis.crudUserId = user.id;
+});
+await test('CRUD: profile update — rename, role change, password reset', async () => {
+  const updated = await api(cpo.token, 'PATCH', `/users/${globalThis.crudUserId}`, { fullName: 'Ayesha R. Karim', role: 'PM', password: 'Pointfex-456' });
+  assert(updated.fullName === 'Ayesha R. Karim' && updated.role === 'PM', 'update failed');
+  const session = await login('ayesha@pointfex.dev', 'Pointfex-456');
+  assert(session.user.role === 'PM', 'new password / role not effective');
+});
+await test('CRUD: deactivation blocks login and revokes sessions', async () => {
+  await api(cpo.token, 'PATCH', `/users/${globalThis.crudUserId}`, { isActive: false });
+  const r = await raw('POST', '/auth/login', { email: 'ayesha@pointfex.dev', password: 'Pointfex-456' });
+  assert(r.status === 401, `deactivated user logged in (${r.status})`);
+  await api(cpo.token, 'PATCH', `/users/${globalThis.crudUserId}`, { isActive: true });
+});
+await test('CRUD: developer cannot create users (403)', async () => {
+  await expectStatus(d11.token, 'POST', '/users', { email: 'x@x.x', fullName: 'X Y', password: 'Pointfex-789', role: 'DEVELOPER' }, 403, 'dev create user');
+});
+await test('BR: developer tiers removed — API no longer exposes them', async () => {
+  const me = await api(d11.token, 'GET', '/auth/me');
+  assert(!('tier' in me) || me.tier === undefined, 'user payload still exposes tier');
+  const cols = dbq(`SELECT column_name FROM information_schema.columns WHERE table_name='User' AND column_name='tier'`);
+  assert(cols === '', 'User.tier column still exists in database');
+});
+
 /* ============================================================= GLOBAL INVARIANTS */
 section('GLOBAL INVARIANTS');
 await test('Double-entry conservation: Σ all account balances == seeded ৳5,600,000', async () => {

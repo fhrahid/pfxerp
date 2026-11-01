@@ -1,0 +1,101 @@
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { UserRole } from '@prisma/client';
+import * as bcrypt from 'bcryptjs';
+import { PrismaService } from '../../prisma/prisma.service';
+import { AppException } from '../../common/exceptions/app.exception';
+
+export interface CreateUserDto {
+  email: string;
+  fullName: string;
+  password: string;
+  role: UserRole;
+  studentId?: string;
+}
+
+export interface UpdateUserDto {
+  fullName?: string;
+  email?: string;
+  role?: UserRole;
+  studentId?: string | null;
+  isActive?: boolean;
+  password?: string;
+}
+
+/**
+ * People operations (chro.md §2.1): CPO/CEO create user profiles (with an
+ * auto-provisioned personal wallet) and manage them — role changes, renaming,
+ * password resets and (de)activation.
+ */
+@Injectable()
+export class UsersService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  private safe(user: { id: string; email: string; fullName: string; role: UserRole; studentId: string | null; isActive: boolean }) {
+    return {
+      id: user.id,
+      email: user.email,
+      fullName: user.fullName,
+      role: user.role,
+      studentId: user.studentId,
+      isActive: user.isActive,
+      hasPassword: true,
+    };
+  }
+
+  async createUser(dto: CreateUserDto) {
+    const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
+    if (existing) throw new AppException('CONFLICT', `A user with email ${dto.email} already exists`);
+    if (dto.studentId) {
+      const clash = await this.prisma.user.findUnique({ where: { studentId: dto.studentId } });
+      if (clash) throw new AppException('CONFLICT', `Student ID ${dto.studentId} is already taken`);
+    }
+
+    const passwordHash = await bcrypt.hash(dto.password, 12);
+    const user = await this.prisma.user.create({
+      data: {
+        email: dto.email,
+        fullName: dto.fullName,
+        passwordHash,
+        role: dto.role,
+        studentId: dto.studentId ?? null,
+        isActive: true,
+      },
+    });
+
+    // Every user gets a PERSONAL_WALLET at enrollment (BR-DEV-14)
+    await this.prisma.account.create({
+      data: { ownerId: user.id, type: 'PERSONAL_WALLET', balance: 0, currency: 'BDT' },
+    });
+
+    return this.safe(user);
+  }
+
+  async updateUser(userId: string, dto: UpdateUserDto) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    if (dto.email && dto.email !== user.email) {
+      const clash = await this.prisma.user.findUnique({ where: { email: dto.email } });
+      if (clash) throw new AppException('CONFLICT', `A user with email ${dto.email} already exists`);
+    }
+    if (dto.studentId && dto.studentId !== user.studentId) {
+      const clash = await this.prisma.user.findUnique({ where: { studentId: dto.studentId } });
+      if (clash) throw new AppException('CONFLICT', `Student ID ${dto.studentId} is already taken`);
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        ...(dto.fullName ? { fullName: dto.fullName } : {}),
+        ...(dto.email ? { email: dto.email } : {}),
+        ...(dto.role ? { role: dto.role } : {}),
+        ...(dto.studentId !== undefined ? { studentId: dto.studentId } : {}),
+        ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+        ...(dto.password ? { passwordHash: await bcrypt.hash(dto.password, 12) } : {}),
+        // password change or deactivation invalidates all refresh sessions
+        ...(dto.password || dto.isActive === false ? { refreshTokenHash: null } : {}),
+      },
+    });
+    return this.safe(updated);
+  }
+}

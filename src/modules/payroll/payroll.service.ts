@@ -97,7 +97,7 @@ export class PayrollService {
       take: 100,
       include: {
         squad: { select: { id: true, name: true } },
-        lineItems: { include: { user: { select: { id: true, fullName: true, tier: true } } } },
+        lineItems: { include: { user: { select: { id: true, fullName: true } } } },
       },
     });
   }

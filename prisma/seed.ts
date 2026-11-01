@@ -1,24 +1,25 @@
 /* eslint-disable no-console */
 // Pointfex ERP — Genesis Seeder (main.md §8, other.md §8)
+//
+// Two levels:
+//   runBootstrapSeed() — production-safe: SystemSettings, SYSTEM_RESERVE, ESCROW,
+//                        and a single CEO account from INITIAL_CEO_EMAIL /
+//                        INITIAL_CEO_PASSWORD (random + printed if not provided).
+//   runDemoSeed()      — local/dev demo dataset: CFO/CTO/CPO, 6 squads,
+//                        PM + 4 developers each, CTO lifetime certifications.
+//
+// CLI:  node dist/prisma/seed.js            → bootstrap + demo (dev default)
+//       SEED_DEMO=false node dist/seed.js   → bootstrap only
+// API:  AUTO_SEED=true                      → bootstrap only
+//       AUTO_SEED=true + SEED_DEMO=true     → bootstrap + demo
 import '../src/env';
-import { PrismaClient, AccountType, UserRole, DeveloperTier, SquadRole, CertificationType } from '@prisma/client';
+import { PrismaClient, AccountType, UserRole, SquadRole, CertificationType } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
+import { randomBytes } from 'crypto';
 
 const prisma = new PrismaClient();
 
-const DEFAULT_PASSWORD = process.env.INITIAL_CEO_PASSWORD || 'PointfexCeo2026!';
-const MEMBER_PASSWORD = 'Pointfex2026!';
-const SQUAD_COUNT = 6;
-const DEVS_PER_SQUAD = 4; // 1 PM + 4 devs = 5 per squad => 30 students + 3 execs = 33
-
-async function upsertUser(data: {
-  email: string;
-  fullName: string;
-  role: UserRole;
-  tier?: DeveloperTier;
-  studentId?: string;
-  password: string;
-}) {
+async function upsertUser(data: { email: string; fullName: string; role: UserRole; studentId?: string; password: string }) {
   const passwordHash = await bcrypt.hash(data.password, 12);
   const user = await prisma.user.upsert({
     where: { email: data.email },
@@ -28,12 +29,10 @@ async function upsertUser(data: {
       passwordHash,
       fullName: data.fullName,
       role: data.role,
-      tier: data.tier ?? null,
       studentId: data.studentId ?? null,
       isActive: true,
     },
   });
-  // Provision personal wallet
   await prisma.account.upsert({
     where: { ownerId: user.id },
     update: {},
@@ -42,27 +41,16 @@ async function upsertUser(data: {
   return user;
 }
 
-async function main() {
-  await runSeed();
-}
+/** Production-safe genesis: no demo users, no squads — just the economic substrate + CEO. */
+export async function runBootstrapSeed() {
+  console.log('--- Pointfex bootstrap seeding (production-safe) ---');
 
-export async function runSeed() {
-  console.log('--- Initializing Pointfex Genesis Seeding ---');
+  // 1. CEO (Course Faculty) — credentials from env; random password printed if not provided
+  const ceoEmail = process.env.INITIAL_CEO_EMAIL || 'noor@seu.edu.bd';
+  const ceoPassword = process.env.INITIAL_CEO_PASSWORD || randomBytes(12).toString('hex');
+  await upsertUser({ email: ceoEmail, fullName: 'Chief Executive Officer', role: UserRole.CEO, password: ceoPassword });
 
-  // 1. CEO (Course Faculty)
-  const ceo = await upsertUser({
-    email: process.env.INITIAL_CEO_EMAIL || 'noor@seu.edu.bd',
-    fullName: 'Asaduzzaman Noor (Course Faculty)',
-    role: UserRole.CEO,
-    password: DEFAULT_PASSWORD,
-  });
-
-  // 2. Executive Board (Team 0)
-  const cfo = await upsertUser({ email: 'cfo@pointfex.dev', fullName: 'Ferdous Hasan Rahid (CFO)', role: UserRole.CFO, password: MEMBER_PASSWORD, studentId: 'CSE001' });
-  const cto = await upsertUser({ email: 'cto@pointfex.dev', fullName: 'A R M Abir (CTO)', role: UserRole.CTO, password: MEMBER_PASSWORD, studentId: 'CSE002' });
-  const cpo = await upsertUser({ email: 'cpo@pointfex.dev', fullName: 'Soyeb Naim (CPO)', role: UserRole.CPO, password: MEMBER_PASSWORD, studentId: 'CSE003' });
-
-  // 3. System Reserve + Escrow accounts
+  // 2. System Reserve + Escrow accounts
   const reserveFund = Number(process.env.INITIAL_SYSTEM_RESERVE_FUND || 5000000);
   let systemReserve = await prisma.account.findFirst({ where: { type: AccountType.SYSTEM_RESERVE } });
   if (!systemReserve) {
@@ -75,7 +63,7 @@ export async function runSeed() {
     escrow = await prisma.account.create({ data: { type: AccountType.ESCROW, balance: 0, currency: 'BDT' } });
   }
 
-  // 4. Core System Settings
+  // 3. Core System Settings
   const defaultSettings: { key: string; value: string; type: string }[] = [
     { key: 'SQUAD_INITIAL_BALANCE', value: '100000', type: 'NUMBER' },
     { key: 'WEEKLY_LAB_BUDGET', value: '10000', type: 'NUMBER' },
@@ -118,7 +106,21 @@ export async function runSeed() {
     await prisma.systemSetting.upsert({ where: { key: s.key }, update: {}, create: s });
   }
 
-  // 5. CTO auto-certifications (BR-CTO-34, BR-CTO-40: lifetime preapproval)
+  console.log(`CEO account: ${ceoEmail} / ${process.env.INITIAL_CEO_PASSWORD ? '(password from INITIAL_CEO_PASSWORD)' : ceoPassword}`);
+  console.log(`System Reserve: BDT ${systemReserve.balance} | Escrow account: provisioned`);
+}
+
+/** Local/dev demo dataset — NOT used in production deployments. */
+export async function runDemoSeed() {
+  console.log('--- Pointfex demo dataset (dev only) ---');
+  const MEMBER_PASSWORD = process.env.SEED_DEMO_PASSWORD || 'Pointfex2026!';
+
+  // Executive board (Team 0)
+  const cfo = await upsertUser({ email: 'cfo@pointfex.dev', fullName: 'Farhan Rahman (CFO)', role: UserRole.CFO, studentId: 'CSE001', password: MEMBER_PASSWORD });
+  const cto = await upsertUser({ email: 'cto@pointfex.dev', fullName: 'Nafisa Ahmed (CTO)', role: UserRole.CTO, studentId: 'CSE002', password: MEMBER_PASSWORD });
+  await upsertUser({ email: 'cpo@pointfex.dev', fullName: 'Rafiul Karim (CPO)', role: UserRole.CPO, studentId: 'CSE003', password: MEMBER_PASSWORD });
+
+  // CTO auto-certifications (BR-CTO-34, BR-CTO-40: lifetime preapproval)
   for (const t of [CertificationType.CONSULTANT, CertificationType.MARKETPLACE_AUTHOR, CertificationType.SECURITY_RESEARCHER]) {
     await prisma.ctoProviderCertification.upsert({
       where: { userId_certificationType: { userId: cto.id, certificationType: t } },
@@ -135,18 +137,15 @@ export async function runSeed() {
     });
   }
 
-  // 6. Product Squads 1..6 with treasuries + memberships
-  const initialBalance = Number(defaultSettings.find((s) => s.key === 'SQUAD_INITIAL_BALANCE')!.value);
-  const tiers = [DeveloperTier.TIER_A, DeveloperTier.TIER_B, DeveloperTier.TIER_C, DeveloperTier.TIER_D];
+  // 6 product squads: treasury + 1 PM + 4 developers each
+  const initialBalance = 100000;
   let studentSeq = 4;
-
-  for (let i = 1; i <= SQUAD_COUNT; i++) {
+  for (let i = 1; i <= 6; i++) {
     const squad = await prisma.squad.upsert({
       where: { name: `Squad ${i}` },
       update: {},
       create: { name: `Squad ${i}`, description: `Product Engineering Squad ${i}`, valuation: initialBalance },
     });
-
     await prisma.account.upsert({
       where: { squadId: squad.id },
       update: {},
@@ -154,12 +153,8 @@ export async function runSeed() {
     });
 
     const pm = await upsertUser({
-      email: `pm${i}@pointfex.dev`,
-      fullName: `PM Squad ${i}`,
-      role: UserRole.PM,
-      tier: DeveloperTier.TIER_A,
-      studentId: `CSE${String(studentSeq++).padStart(3, '0')}`,
-      password: MEMBER_PASSWORD,
+      email: `pm${i}@pointfex.dev`, fullName: `PM Squad ${i}`, role: UserRole.PM,
+      studentId: `CSE${String(studentSeq++).padStart(3, '0')}`, password: MEMBER_PASSWORD,
     });
     await prisma.squadMembership.upsert({
       where: { userId_squadId: { userId: pm.id, squadId: squad.id } },
@@ -167,14 +162,10 @@ export async function runSeed() {
       create: { userId: pm.id, squadId: squad.id, role: SquadRole.PM, allocation: 1.0, isPrimary: true },
     });
 
-    for (let j = 1; j <= DEVS_PER_SQUAD; j++) {
+    for (let j = 1; j <= 4; j++) {
       const dev = await upsertUser({
-        email: `dev${i}_${j}@pointfex.dev`,
-        fullName: `Dev ${i}-${j}`,
-        role: UserRole.DEVELOPER,
-        tier: tiers[(j - 1) % tiers.length],
-        studentId: `CSE${String(studentSeq++).padStart(3, '0')}`,
-        password: MEMBER_PASSWORD,
+        email: `dev${i}_${j}@pointfex.dev`, fullName: `Dev ${i}-${j}`, role: UserRole.DEVELOPER,
+        studentId: `CSE${String(studentSeq++).padStart(3, '0')}`, password: MEMBER_PASSWORD,
       });
       await prisma.squadMembership.upsert({
         where: { userId_squadId: { userId: dev.id, squadId: squad.id } },
@@ -183,19 +174,26 @@ export async function runSeed() {
       });
     }
   }
+  console.log(`Demo dataset ready: execs + 6 squads (PM + 4 devs each), member password: ${MEMBER_PASSWORD}`);
+}
 
-  console.log('--- Pointfex Genesis Seeding Completed ---');
-  console.log(`CEO:  ${ceo.email} / ${DEFAULT_PASSWORD}`);
-  console.log(`CFO:  ${cfo.email} / ${MEMBER_PASSWORD}`);
-  console.log(`CTO:  ${cto.email} / ${MEMBER_PASSWORD}`);
-  console.log(`CPO:  ${cpo.email} / ${MEMBER_PASSWORD}`);
-  console.log(`PMs:  pm1..pm${SQUAD_COUNT}@pointfex.dev / ${MEMBER_PASSWORD}`);
-  console.log(`Devs: dev{squad}_{1..4}@pointfex.dev / ${MEMBER_PASSWORD}`);
-  console.log(`System Reserve: BDT ${systemReserve.balance} | Squad treasuries: BDT ${initialBalance} each`);
+/** Legacy full seed (bootstrap + demo) — used by `npm run prisma:seed` in dev. */
+export async function runSeed() {
+  await runBootstrapSeed();
+  await runDemoSeed();
+}
+
+async function main() {
+  await runBootstrapSeed();
+  if (process.env.SEED_DEMO !== 'false') {
+    await runDemoSeed();
+  } else {
+    console.log('SEED_DEMO=false — skipping demo dataset (bootstrap only)');
+  }
 }
 
 // Only auto-run when executed directly (npm run prisma:seed / node dist/prisma/seed.js).
-// When the API imports runSeed() for AUTO_SEED, this block is skipped.
+// When the API imports runBootstrapSeed()/runSeed() for AUTO_SEED, this is skipped.
 if (require.main === module) {
   main()
     .catch((e) => {

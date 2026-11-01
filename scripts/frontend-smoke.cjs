@@ -150,7 +150,7 @@ function check(name, cond) {
   check('sidebar rendered', getEl('app').innerHTML.includes('sidebar'));
   check('overview rendered', getEl('content').innerHTML.includes('My Wallet'));
 
-  const tabs = ['kanban', 'squads', 'payroll', 'finance', 'governance', 'bounty', 'cto', 'clients', 'notices', 'chaos', 'leaderboard', 'users', 'settings'];
+  const tabs = ['kanban', 'squads', 'roster', 'payroll', 'finance', 'governance', 'marketplace', 'consultancy', 'quality', 'bounty', 'clients', 'notices', 'chaos', 'leaderboard', 'settings'];
   for (const t of tabs) {
     try {
       vm.runInContext(`setTab('${t}')`, sandbox);

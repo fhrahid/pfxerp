@@ -51,7 +51,7 @@ export class SquadsService {
         account: true,
         memberships: {
           where: { leftAt: null },
-          include: { user: { select: { id: true, fullName: true, email: true, role: true, tier: true, isActive: true } } },
+          include: { user: { select: { id: true, fullName: true, email: true, role: true, isActive: true } } },
         },
       },
     });
@@ -72,7 +72,6 @@ export class SquadsService {
           fullName: m.user.fullName,
           email: m.user.email,
           role: m.role,
-          tier: m.user.tier,
           allocation: Number(m.allocation),
         })),
     };
