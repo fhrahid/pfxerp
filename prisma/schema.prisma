@@ -20,13 +20,6 @@ enum UserRole {
   DEVELOPER
 }
 
-enum DeveloperTier {
-  TIER_A
-  TIER_B
-  TIER_C
-  TIER_D
-}
-
 enum SquadRole {
   PM
   DEVELOPER
@@ -227,7 +220,6 @@ model User {
   fullName         String
   studentId        String?        @unique
   role             UserRole
-  tier             DeveloperTier?
   isActive         Boolean        @default(true)
   publicKey        String?        @db.Text
   refreshTokenHash String?
