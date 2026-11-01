@@ -21,10 +21,10 @@ enum UserRole {
 }
 
 enum DeveloperTier {
-  DEV1
-  DEV2
-  DEV3
-  DEV4
+  TIER_A
+  TIER_B
+  TIER_C
+  TIER_D
 }
 
 enum SquadRole {
