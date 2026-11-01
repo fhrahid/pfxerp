@@ -71,41 +71,135 @@ export class TasksService {
     return this.settings.currentSprint();
   }
 
-  // ---- DPI / PMHI snapshot helpers (dev.md §6, pm.md §6) ----
-  private async bumpDevSnapshot(userId: string, patch: { dpiDelta?: number; prematureFlag?: boolean; pointsCompleted?: number; pointsAssigned?: number }) {
-    const sprint = await this.sprintNumber();
-    await this.prisma.developerPerformanceSnapshot.upsert({
-      where: { userId_sprintNumber: { userId, sprintNumber: sprint } },
+  // ---- DPI / PMHI true formula calculations (dev.md §6, pm.md §6) ----
+  async recomputeDevDpi(userId: string, sprint?: number) {
+    const sprintNumber = sprint ?? (await this.sprintNumber());
+    const [tasks, snapshot] = await Promise.all([
+      this.prisma.task.findMany({ where: { assignedToId: userId, sprintNumber } }),
+      this.prisma.developerPerformanceSnapshot.findUnique({
+        where: { userId_sprintNumber: { userId, sprintNumber } },
+      }),
+    ]);
+
+    const prematureFlags = snapshot?.prematureFlagsCount || 0;
+    const bugBounties = snapshot?.bugBountyContributions || 0;
+
+    let assignedPoints = 0;
+    let completedPoints = 0;
+    let onTimeCount = 0;
+    let completedCount = 0;
+    let ctoPassCount = 0;
+    let ctoReviewedCount = 0;
+
+    for (const t of tasks) {
+      const points = t.storyPoints || 0;
+      assignedPoints += points;
+      if (t.status === 'CTO_VERIFIED' || t.status === 'CLOSED') {
+        completedPoints += points;
+        completedCount++;
+        if (!t.dueDate || (t.ctoVerifiedAt && t.ctoVerifiedAt <= t.dueDate) || (t.flaggedCompleteAt && t.flaggedCompleteAt <= t.dueDate)) {
+          onTimeCount++;
+        }
+      }
+      if (t.ctoVerifiedById) {
+        ctoReviewedCount++;
+        if (t.ctoQualityPassed) ctoPassCount++;
+      }
+    }
+
+    const onTimeRate = completedCount > 0 ? onTimeCount / completedCount : 1.0;
+    const ctoPassRate = ctoReviewedCount > 0 ? ctoPassCount / ctoReviewedCount : 1.0;
+    const completionRatio = assignedPoints > 0 ? completedPoints / assignedPoints : (tasks.length === 0 ? 1.0 : 0.0);
+
+    let score = assignedPoints === 0 && tasks.length === 0 && prematureFlags === 0
+      ? 100
+      : (completionRatio * 40) + (onTimeRate * 20) + (ctoPassRate * 25) - (prematureFlags * 15) + (bugBounties * 2);
+
+    score = Math.max(0, Math.min(100, Math.round(score * 100) / 100));
+
+    return this.prisma.developerPerformanceSnapshot.upsert({
+      where: { userId_sprintNumber: { userId, sprintNumber } },
       update: {
-        ...(patch.dpiDelta ? { dpiScore: { decrement: patch.dpiDelta } } : {}),
-        ...(patch.prematureFlag ? { prematureFlagsCount: { increment: 1 } } : {}),
-        ...(patch.pointsCompleted ? { storyPointsCompleted: { increment: patch.pointsCompleted } } : {}),
-        ...(patch.pointsAssigned ? { storyPointsAssigned: { increment: patch.pointsAssigned } } : {}),
+        dpiScore: new Prisma.Decimal(score.toFixed(2)),
+        storyPointsAssigned: assignedPoints,
+        storyPointsCompleted: completedPoints,
+        onTimeDeliveryRate: new Prisma.Decimal(onTimeRate.toFixed(2)),
+        ctoQualityPassRate: new Prisma.Decimal(ctoPassRate.toFixed(2)),
+        calculatedAt: new Date(),
       },
       create: {
         userId,
-        sprintNumber: sprint,
-        dpiScore: patch.dpiDelta ? -patch.dpiDelta : 100,
-        prematureFlagsCount: patch.prematureFlag ? 1 : 0,
-        storyPointsCompleted: patch.pointsCompleted || 0,
-        storyPointsAssigned: patch.pointsAssigned || 0,
+        sprintNumber,
+        dpiScore: new Prisma.Decimal(score.toFixed(2)),
+        storyPointsAssigned: assignedPoints,
+        storyPointsCompleted: completedPoints,
+        onTimeDeliveryRate: new Prisma.Decimal(onTimeRate.toFixed(2)),
+        ctoQualityPassRate: new Prisma.Decimal(ctoPassRate.toFixed(2)),
+        prematureFlagsCount: prematureFlags,
+        bugBountyContributions: bugBounties,
       },
     });
   }
 
-  private async bumpPmSnapshot(userId: string, patch: { pmhiDelta?: number; override?: boolean }) {
-    const sprint = await this.sprintNumber();
-    await this.prisma.pmPerformanceSnapshot.upsert({
-      where: { userId_sprintNumber: { userId, sprintNumber: sprint } },
+  async recomputePmPmhi(pmUserId: string, squadId: string, sprint?: number) {
+    const sprintNumber = sprint ?? (await this.sprintNumber());
+    const [tasks, snapshot] = await Promise.all([
+      this.prisma.task.findMany({ where: { squadId, sprintNumber } }),
+      this.prisma.pmPerformanceSnapshot.findUnique({
+        where: { userId_sprintNumber: { userId: pmUserId, sprintNumber } },
+      }),
+    ]);
+
+    const ctoOverrides = snapshot?.ctoOverrideCount || 0;
+    let plannedPoints = 0;
+    let completedPoints = 0;
+    let onTimeCount = 0;
+    let completedCount = 0;
+    let ctoAgreedCount = 0;
+    let pmApprovedCount = 0;
+
+    for (const t of tasks) {
+      const points = t.storyPoints || 0;
+      plannedPoints += points;
+      if (t.status === 'CTO_VERIFIED' || t.status === 'CLOSED') {
+        completedPoints += points;
+        completedCount++;
+        if (!t.dueDate || (t.ctoVerifiedAt && t.ctoVerifiedAt <= t.dueDate) || (t.flaggedCompleteAt && t.flaggedCompleteAt <= t.dueDate)) {
+          onTimeCount++;
+        }
+      }
+      if (t.pmVerifiedById && t.ctoVerifiedById) {
+        pmApprovedCount++;
+        if (t.ctoQualityPassed) {
+          ctoAgreedCount++;
+        }
+      }
+    }
+
+    const velocityAccuracy = plannedPoints > 0 ? Math.min(completedPoints / plannedPoints, 1.0) : 1.0;
+    const ctoAgreementRate = pmApprovedCount > 0 ? ctoAgreedCount / pmApprovedCount : 1.0;
+    const onTimeDeliveryRate = completedCount > 0 ? onTimeCount / completedCount : 1.0;
+
+    let score = (velocityAccuracy * 35) + (ctoAgreementRate * 35) + (onTimeDeliveryRate * 30) - (ctoOverrides * 20);
+    score = Math.max(0, Math.min(100, Math.round(score * 100) / 100));
+
+    return this.prisma.pmPerformanceSnapshot.upsert({
+      where: { userId_sprintNumber: { userId: pmUserId, sprintNumber } },
       update: {
-        ...(patch.pmhiDelta ? { pmhiScore: { decrement: patch.pmhiDelta } } : {}),
-        ...(patch.override ? { ctoOverrideCount: { increment: 1 } } : {}),
+        pmhiScore: new Prisma.Decimal(score.toFixed(2)),
+        velocityAccuracy: new Prisma.Decimal(velocityAccuracy.toFixed(2)),
+        ctoAgreementRate: new Prisma.Decimal(ctoAgreementRate.toFixed(2)),
+        onTimeDeliveryRate: new Prisma.Decimal(onTimeDeliveryRate.toFixed(2)),
+        calculatedAt: new Date(),
       },
       create: {
-        userId,
-        sprintNumber: sprint,
-        pmhiScore: patch.pmhiDelta ? 100 - patch.pmhiDelta : 100,
-        ctoOverrideCount: patch.override ? 1 : 0,
+        userId: pmUserId,
+        sprintNumber,
+        pmhiScore: new Prisma.Decimal(score.toFixed(2)),
+        velocityAccuracy: new Prisma.Decimal(velocityAccuracy.toFixed(2)),
+        ctoAgreementRate: new Prisma.Decimal(ctoAgreementRate.toFixed(2)),
+        onTimeDeliveryRate: new Prisma.Decimal(onTimeDeliveryRate.toFixed(2)),
+        ctoOverrideCount: ctoOverrides,
       },
     });
   }
@@ -147,7 +241,7 @@ export class TasksService {
     });
 
     if (task.assignedToId && task.sprintNumber) {
-      await this.bumpDevSnapshot(task.assignedToId, { pointsAssigned: task.storyPoints });
+      await this.recomputeDevDpi(task.assignedToId, task.sprintNumber);
     }
 
     this.events.emitToRoom(this.events.squadRoom(task.squadId), 'task:created', {
@@ -259,11 +353,18 @@ export class TasksService {
     if (task.assignedToId === user.id) {
       throw new ForbiddenException('Self-verification conflict: escalate to CTO or peer PM (pm.md §9.1)');
     }
-    return this.transition(task, TaskStatus.PM_VERIFIED, user.id, comment, {
+    const updated = await this.transition(task, TaskStatus.PM_VERIFIED, user.id, comment, {
       pmVerifiedById: user.id,
       pmVerifiedAt: new Date(),
       pmFeedback: comment,
+      ctoVerifiedById: null,
+      ctoVerifiedAt: null,
+      ctoQualityPassed: null,
     });
+    if (updated.assignedToId) {
+      await this.recomputeDevDpi(updated.assignedToId, task.sprintNumber ?? undefined);
+    }
+    return updated;
   }
 
   /** FLAGGED_COMPLETE -> IN_PROGRESS with premature-flag penalty (BR-PM-04, BR-DEV-05..07). */
@@ -286,7 +387,13 @@ export class TasksService {
     });
 
     if (dto.isPremature && task.assignedToId) {
-      await this.bumpDevSnapshot(task.assignedToId, { dpiDelta: 15, prematureFlag: true });
+      const sprint = task.sprintNumber || (await this.sprintNumber());
+      await this.prisma.developerPerformanceSnapshot.upsert({
+        where: { userId_sprintNumber: { userId: task.assignedToId, sprintNumber: sprint } },
+        update: { prematureFlagsCount: { increment: 1 } },
+        create: { userId: task.assignedToId, sprintNumber: sprint, dpiScore: 85, prematureFlagsCount: 1 },
+      });
+      await this.recomputeDevDpi(task.assignedToId, sprint);
     }
     return { ...updated, penaltyDeducted: penalty };
   }
@@ -313,7 +420,10 @@ export class TasksService {
     });
 
     if (updated.assignedToId) {
-      await this.bumpDevSnapshot(updated.assignedToId, { pointsCompleted: task.storyPoints });
+      await this.recomputeDevDpi(updated.assignedToId, task.sprintNumber ?? undefined);
+    }
+    if (task.pmVerifiedById) {
+      await this.recomputePmPmhi(task.pmVerifiedById, task.squadId, task.sprintNumber ?? undefined);
     }
     return updated;
   }
@@ -334,7 +444,9 @@ export class TasksService {
       throw new ForbiddenException('Conflict of interest: CTO holds active membership in this squad');
     }
 
-    // 1. Automatic citation + fine (squad 2000 -> CTO 1000 + reserve 1000)
+    const sprint = task.sprintNumber || (await this.sprintNumber());
+
+    // 1. Automatic citation + fine (squad 2000 -> CTO 1000 + CFO 400 + reserve 600)
     await this.audit.issueCitation(
       user.id,
       {
@@ -343,23 +455,35 @@ export class TasksService {
         description: `CTO Rejection on Task '${task.title}': ${dto.critique}`,
         taskId: task.id,
       },
-      `ctoreject_${task.id}_${Date.now()}`,
+      `ctoreject_${task.id}_${sprint}`,
     );
 
-    // 2. PMHI rubber-stamp demerit (BR-CTO-13)
-    if (task.pmVerifiedById) {
-      await this.bumpPmSnapshot(task.pmVerifiedById, { pmhiDelta: 5, override: true });
-    }
-
-    // 3. Reset to IN_PROGRESS
+    // 2. Reset to IN_PROGRESS (transition task first so DB has updated status and ctoQualityPassed=false)
     const fine = await this.settings.getNumber('CODE_AUDIT_FINE', 2000);
-    return this.transition(task, TaskStatus.IN_PROGRESS, user.id, dto.critique, {
+    const updated = await this.transition(task, TaskStatus.IN_PROGRESS, user.id, dto.critique, {
       ctoVerifiedById: user.id,
       ctoVerifiedAt: new Date(),
       ctoQualityPassed: false,
       ctoFineLevied: new Prisma.Decimal(fine),
       ctoCritique: dto.critique,
     });
+
+    // 3. PMHI rubber-stamp demerit (BR-CTO-13) & recompute scores on fresh state
+    if (task.pmVerifiedById) {
+      await this.prisma.pmPerformanceSnapshot.upsert({
+        where: { userId_sprintNumber: { userId: task.pmVerifiedById, sprintNumber: sprint } },
+        update: { ctoOverrideCount: { increment: 1 } },
+        create: { userId: task.pmVerifiedById, sprintNumber: sprint, pmhiScore: 80, ctoOverrideCount: 1 },
+      });
+      await this.recomputePmPmhi(task.pmVerifiedById, task.squadId, sprint);
+    }
+
+    // 4. Recompute developer DPI on rejection
+    if (task.assignedToId) {
+      await this.recomputeDevDpi(task.assignedToId, sprint);
+    }
+
+    return updated;
   }
 
   /** CTO_VERIFIED -> CLOSED by PM or CTO. */
@@ -367,7 +491,14 @@ export class TasksService {
     const task = await this.getTaskOrThrow(taskId);
     this.assertTransition(task, TaskStatus.CLOSED);
     await this.assertPmOrExec(user, task.squadId);
-    return this.transition(task, TaskStatus.CLOSED, user.id, 'Merged & deployed');
+    const closed = await this.transition(task, TaskStatus.CLOSED, user.id, 'Merged & deployed');
+    if (closed.assignedToId) {
+      await this.recomputeDevDpi(closed.assignedToId, closed.sprintNumber ?? undefined);
+    }
+    if (closed.pmVerifiedById) {
+      await this.recomputePmPmhi(closed.pmVerifiedById, closed.squadId, closed.sprintNumber ?? undefined);
+    }
+    return closed;
   }
 
   private async getTaskOrThrow(taskId: string): Promise<Task> {
