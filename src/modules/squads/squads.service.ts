@@ -51,7 +51,7 @@ export class SquadsService {
         account: true,
         memberships: {
           where: { leftAt: null },
-          include: { user: { select: { id: true, fullName: true, email: true, role: true, tier: true } } },
+          include: { user: { select: { id: true, fullName: true, email: true, role: true, tier: true, isActive: true } } },
         },
       },
     });
@@ -60,19 +60,80 @@ export class SquadsService {
       id: squad.id,
       name: squad.name,
       description: squad.description,
+      isActive: squad.isActive,
       healthStatus: squad.healthStatus,
       valuation: Number(squad.valuation),
       balance: squad.account ? Number(squad.account.balance) : 0,
-      members: squad.memberships.map((m) => ({
-        membershipId: m.id,
-        userId: m.user.id,
-        fullName: m.user.fullName,
-        email: m.user.email,
-        role: m.role,
-        tier: m.user.tier,
-        allocation: Number(m.allocation),
-      })),
+      members: squad.memberships
+        .filter((m) => m.user.isActive)
+        .map((m) => ({
+          membershipId: m.id,
+          userId: m.user.id,
+          fullName: m.user.fullName,
+          email: m.user.email,
+          role: m.role,
+          tier: m.user.tier,
+          allocation: Number(m.allocation),
+        })),
     };
+  }
+
+  /** CPO/CEO: create a squad + treasury, optionally funded from SYSTEM_RESERVE. */
+  async createSquad(user: { id: string }, dto: { name: string; description?: string; initialBalance?: number }) {
+    const existing = await this.prisma.squad.findUnique({ where: { name: dto.name } });
+    if (existing) throw new AppException('CONFLICT', `A squad named "${dto.name}" already exists`);
+
+    const squad = await this.prisma.squad.create({
+      data: { name: dto.name, description: dto.description },
+    });
+    await this.prisma.account.create({
+      data: { squadId: squad.id, type: 'SQUAD_TREASURY', balance: 0, currency: 'BDT' },
+    });
+
+    const initial = dto.initialBalance ?? (await this.settings.getNumber('SQUAD_INITIAL_BALANCE', 100000));
+    if (initial > 0) {
+      const reserve = await this.ledger.systemReserve();
+      const treasury = await this.ledger.squadTreasury(squad.id);
+      await this.ledger.executeDoubleEntryTransfer({
+        senderAccountId: reserve.id,
+        recipientAccountId: treasury.id,
+        amount: initial,
+        referenceType: 'SQUAD_FUNDING',
+        referenceId: squad.id,
+        description: `Initial treasury funding for ${squad.name}`,
+        idempotencyKey: `squad_funding_${squad.id}`,
+        authorizedById: user.id,
+      });
+    }
+
+    const fresh = await this.prisma.squad.findUnique({ where: { id: squad.id }, include: { account: true } });
+    return {
+      id: fresh!.id,
+      name: fresh!.name,
+      description: fresh!.description,
+      isActive: fresh!.isActive,
+      balance: fresh!.account ? Number(fresh!.account.balance) : 0,
+    };
+  }
+
+  /** CPO/CEO: rename / re-describe / (de)activate a squad. */
+  async updateSquad(squadId: string, dto: { name?: string; description?: string; isActive?: boolean }) {
+    const squad = await this.prisma.squad.findUnique({ where: { id: squadId } });
+    if (!squad) throw new NotFoundException('Squad not found');
+
+    if (dto.name && dto.name !== squad.name) {
+      const clash = await this.prisma.squad.findUnique({ where: { name: dto.name } });
+      if (clash) throw new AppException('CONFLICT', `A squad named "${dto.name}" already exists`);
+    }
+
+    return this.prisma.squad.update({
+      where: { id: squadId },
+      data: {
+        ...(dto.name ? { name: dto.name } : {}),
+        ...(dto.description !== undefined ? { description: dto.description } : {}),
+        ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+      },
+    });
   }
 
   /** Sum of a user's active allocations must stay <= 1.0 (BR-CHRO-02). */

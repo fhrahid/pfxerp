@@ -58,9 +58,9 @@ export async function runSeed() {
   });
 
   // 2. Executive Board (Team 0)
-  const cfo = await upsertUser({ email: 'cfo@pointfex.dev', fullName: 'Farhan Rahman (CFO)', role: UserRole.CFO, password: MEMBER_PASSWORD, studentId: 'CSE001' });
-  const cto = await upsertUser({ email: 'cto@pointfex.dev', fullName: 'Nafisa Ahmed (CTO)', role: UserRole.CTO, password: MEMBER_PASSWORD, studentId: 'CSE002' });
-  const cpo = await upsertUser({ email: 'cpo@pointfex.dev', fullName: 'Rafiul Karim (CPO)', role: UserRole.CPO, password: MEMBER_PASSWORD, studentId: 'CSE003' });
+  const cfo = await upsertUser({ email: 'cfo@pointfex.dev', fullName: 'Ferdous Hasan Rahid (CFO)', role: UserRole.CFO, password: MEMBER_PASSWORD, studentId: 'CSE001' });
+  const cto = await upsertUser({ email: 'cto@pointfex.dev', fullName: 'A R M Abir (CTO)', role: UserRole.CTO, password: MEMBER_PASSWORD, studentId: 'CSE002' });
+  const cpo = await upsertUser({ email: 'cpo@pointfex.dev', fullName: 'Soyeb Naim (CPO)', role: UserRole.CPO, password: MEMBER_PASSWORD, studentId: 'CSE003' });
 
   // 3. System Reserve + Escrow accounts
   const reserveFund = Number(process.env.INITIAL_SYSTEM_RESERVE_FUND || 5000000);

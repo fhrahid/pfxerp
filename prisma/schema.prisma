@@ -21,10 +21,10 @@ enum UserRole {
 }
 
 enum DeveloperTier {
-  TIER_A
-  TIER_B
-  TIER_C
-  TIER_D
+  DEV
+  DEV
+  DEV
+  DEV
 }
 
 enum SquadRole {
@@ -63,6 +63,7 @@ enum TransactionType {
   CEO_BONUS
   CODE_AUDIT_FINE
   SLACKER_FINE
+  SQUAD_FUNDING
 }
 
 enum TaskStatus {

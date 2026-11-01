@@ -1,5 +1,5 @@
-import { Body, Controller, Delete, Get, Headers, Param, Post } from '@nestjs/common';
-import { IsIn, IsUUID, Max, Min, IsNumber } from 'class-validator';
+import { Body, Controller, Delete, Get, Headers, Param, Patch, Post } from '@nestjs/common';
+import { IsIn, IsInt, IsNumber, IsOptional, IsString, IsUUID, Max, Min, MinLength } from 'class-validator';
 import { UserRole } from '@prisma/client';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Roles, CurrentUser } from '../../common/decorators';
@@ -17,6 +17,35 @@ class AddMemberDto {
   @Min(0.01)
   @Max(1)
   allocation: number;
+}
+
+class CreateSquadDto {
+  @IsString()
+  @MinLength(2)
+  name: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  initialBalance?: number;
+}
+
+class UpdateSquadDto {
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  isActive?: boolean;
 }
 
 class TransferMemberDto {
@@ -49,6 +78,20 @@ export class SquadsController {
   @Get(':id')
   findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.squads.getSquad(user, id);
+  }
+
+  /** CPO/CEO: create a squad (treasury auto-provisioned, funded from reserve). */
+  @Post()
+  @Roles(UserRole.CPO, UserRole.CEO)
+  create(@Body() dto: CreateSquadDto, @CurrentUser() user: AuthUser) {
+    return this.squads.createSquad(user, dto);
+  }
+
+  /** CPO/CEO: rename / re-describe / (de)activate. */
+  @Patch(':id')
+  @Roles(UserRole.CPO, UserRole.CEO)
+  update(@Param('id') id: string, @Body() dto: UpdateSquadDto) {
+    return this.squads.updateSquad(id, dto);
   }
 
   /** CPO roster management (chro.md §2.5). */
