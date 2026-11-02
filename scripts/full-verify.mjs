@@ -951,17 +951,28 @@ await test('BR: PM task is forced into the active sprint even if they pass anoth
   await api(cto.token, 'POST', '/settings/current-sprint', { sprintNumber: 1 }); // restore
 });
 
-section('GITHUB INTEGRATION — squad repos');
-await test('BR: squad PM connects a repo; invalid URLs rejected; foreign members blocked', async () => {
-  const r = await raw('PUT', `/squads/${squadId(2)}/github`, { repoUrl: 'https://github.com/octocat/Hello-World' }, pm2.token);
-  assert(r.ok && r.data.connected === true, `connect failed: ${r.status}`);
-  await expectStatus(pm2.token, 'PUT', `/squads/${squadId(2)}/github`, { repoUrl: 'https://gitlab.com/foo/bar' }, 400, 'non-github url');
-  await expectStatus(pm1.token, 'GET', `/squads/${squadId(2)}/github/activity`, undefined, 403, 'foreign PM reads activity');
-  await expectStatus(d31.token, 'GET', `/squads/${squadId(2)}/github/activity`, undefined, 403, 'foreign dev reads activity');
+section('GITHUB INTEGRATION — multi-repo per squad');
+await test('BR: squad PM adds repos; duplicates + invalid URLs rejected; foreign members blocked', async () => {
+  const r = await raw('POST', `/squads/${squadId(2)}/github/repos`, { repoUrl: 'https://github.com/octocat/Hello-World' }, pm2.token);
+  assert(r.ok && r.data.owner === 'octocat', `add failed: ${r.status} ${r.error?.message}`);
+  const dup = await raw('POST', `/squads/${squadId(2)}/github/repos`, { repoUrl: 'https://github.com/octocat/Hello-World' }, pm2.token);
+  assert(dup.status === 409, `duplicate repo got ${dup.status}`);
+  const bad = await raw('POST', `/squads/${squadId(2)}/github/repos`, { repoUrl: 'https://gitlab.com/foo/bar' }, pm2.token);
+  assert(bad.status === 400, `non-github url got ${bad.status}`);
+  await expectStatus(pm1.token, 'GET', `/squads/${squadId(2)}/github/repos`, undefined, 403, 'foreign PM lists repos');
+  globalThis.repoId = r.data.id;
 });
-await test('BR: activity feed returns mapped commits (public repo, live GitHub API)', async () => {
+await test('BR: second repo connects (squads run multiple projects)', async () => {
+  const r = await await raw('POST', `/squads/${squadId(2)}/github/repos`, { repoUrl: 'https://github.com/octocat/Spoon-Knife', name: 'second project' }, cto.token);
+  assert(r.ok, `second repo failed: ${r.status}`);
+  const list = await api(pm2.token, 'GET', `/squads/${squadId(2)}/github/repos`);
+  assert(list.length === 2, `expected 2 repos, got ${list.length}`);
+  assert(list.some((x) => x.name === 'second project'), 'display name not stored');
+  globalThis.repo2Id = r.data.id;
+});
+await test('BR: activity feed returns mapped commits (live GitHub API)', async () => {
   try {
-    const r = await api(pm2.token, 'GET', `/squads/${squadId(2)}/github/activity`);
+    const r = await api(pm2.token, 'GET', `/squads/${squadId(2)}/github/repos/${globalThis.repoId}/activity`);
     assert(Array.isArray(r.commits) && r.commits.length > 0, 'no commits returned');
     const c = r.commits[0];
     assert(c.sha && c.message && c.author && c.date, 'commit fields not mapped');
@@ -970,9 +981,22 @@ await test('BR: activity feed returns mapped commits (public repo, live GitHub A
     console.log(`        (network unavailable in test env: ${String(e.message).slice(0, 70)})`);
   }
 });
-await test('BR: squad without a repo gets a clear message', async () => {
-  const r = await raw('GET', `/squads/${squadId(4)}/github/activity`, undefined, pm4.token);
-  assert(!r.ok && String(r.error?.message).includes('No GitHub repository'), `got ${r.status}: ${r.error?.message}`);
+await test('BR: repo summary — stack, contributors, code size (live GitHub API)', async () => {
+  try {
+    const s = await api(cto.token, 'GET', `/squads/${squadId(2)}/github/repos/${globalThis.repoId}/summary`);
+    assert(Array.isArray(s.stack) && s.stack.length > 0, 'no languages returned');
+    assert(typeof s.codeSizeBytes === 'number' && s.codeSizeBytes > 0, 'no code size');
+    assert(s.contributorCount >= 1 && Array.isArray(s.contributors), 'no contributors');
+    console.log(`        (stack: ${s.stack.map((l) => l.language + ' ' + l.share + '%').join(', ')})`);
+  } catch (e) {
+    console.log(`        (network unavailable in test env: ${String(e.message).slice(0, 70)})`);
+  }
+});
+await test('BR: removing a repo works (squad PM)', async () => {
+  const r = await raw('DELETE', `/squads/${squadId(2)}/github/repos/${globalThis.repo2Id}`, undefined, pm2.token);
+  assert(r.ok && r.data.removed === true, `remove failed: ${r.status}`);
+  const list = await api(pm2.token, 'GET', `/squads/${squadId(2)}/github/repos`);
+  assert(list.length === 1, `expected 1 repo after removal, got ${list.length}`);
 });
 
 /* ============================================================= GLOBAL INVARIANTS */

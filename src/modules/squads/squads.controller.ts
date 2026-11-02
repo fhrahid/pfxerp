@@ -6,10 +6,14 @@ import { Roles, CurrentUser } from '../../common/decorators';
 import { AuthUser } from '../../common/types';
 import { SquadsService } from './squads.service';
 
-class GithubRepoDto {
+class AddRepoDto {
   @IsString()
   @MinLength(11)
   repoUrl: string;
+
+  @IsOptional()
+  @IsString()
+  name?: string;
 
   @IsOptional()
   @IsString()
@@ -104,17 +108,36 @@ export class SquadsController {
     return this.squads.updateSquad(id, dto);
   }
 
-  /** Connect the squad's GitHub repo (squad PM or C-level). */
-  @Put(':id/github')
-  @Roles(UserRole.PM, UserRole.CEO, UserRole.CFO, UserRole.CTO, UserRole.CPO)
-  connectGithub(@Param('id') id: string, @Body() dto: GithubRepoDto, @CurrentUser() user: AuthUser) {
-    return this.squads.setGithubRepo(user, id, dto);
+  /** List connected repositories (squad members + C-level). */
+  @Get(':id/github/repos')
+  listRepos(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.squads.listRepos(user, id);
   }
 
-  /** Recent commits for the squad's repo (squad members + C-level). */
-  @Get(':id/github/activity')
-  githubActivity(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.squads.githubActivity(user, id);
+  /** Connect another repository (squad PM or C-level). */
+  @Post(':id/github/repos')
+  @Roles(UserRole.PM, UserRole.CEO, UserRole.CFO, UserRole.CTO, UserRole.CPO)
+  addRepo(@Param('id') id: string, @Body() dto: AddRepoDto, @CurrentUser() user: AuthUser) {
+    return this.squads.addRepo(user, id, dto);
+  }
+
+  /** Disconnect a repository (squad PM or C-level). */
+  @Delete(':id/github/repos/:repoId')
+  @Roles(UserRole.PM, UserRole.CEO, UserRole.CFO, UserRole.CTO, UserRole.CPO)
+  removeRepo(@Param('id') id: string, @Param('repoId') repoId: string, @CurrentUser() user: AuthUser) {
+    return this.squads.removeRepo(user, id, repoId);
+  }
+
+  /** Recent commits for one repo (squad members + C-level). */
+  @Get(':id/github/repos/:repoId/activity')
+  repoActivity(@Param('id') id: string, @Param('repoId') repoId: string, @CurrentUser() user: AuthUser) {
+    return this.squads.repoActivity(user, id, repoId);
+  }
+
+  /** Repo summary: stack, contributors, code size, stars (squad members + C-level). */
+  @Get(':id/github/repos/:repoId/summary')
+  repoSummary(@Param('id') id: string, @Param('repoId') repoId: string, @CurrentUser() user: AuthUser) {
+    return this.squads.repoSummary(user, id, repoId);
   }
 
   /** CPO roster management (chro.md §2.5). */

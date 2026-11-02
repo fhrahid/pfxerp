@@ -80,7 +80,7 @@ function openModal(title, html, wide) {
 }
 function closeModal() { document.getElementById('modal-root').innerHTML = ''; }
 
-function formModal(title, fields, submitLabel, onSubmit, wide) {
+function formModal(title, fields, submitLabel, onSubmit, wide, extraHtml) {
   const body = fields.map((f) => {
     const req = f.required ? 'required' : '';
     if (f.type === 'select') {
@@ -93,7 +93,7 @@ function formModal(title, fields, submitLabel, onSubmit, wide) {
     if (f.type === 'checkbox') return `<label class="check"><input type="checkbox" name="${f.name}" ${f.value ? 'checked' : ''}/> ${esc(f.label)}</label>`;
     return `<label>${esc(f.label)}<input type="${f.hint || 'text'}" name="${f.name}" value="${esc(f.value ?? '')}" placeholder="${esc(f.placeholder || '')}" ${req}/></label>`;
   }).join('');
-  openModal(title, `<form id="mform">${body}
+  openModal(title, `${extraHtml || ''}<form id="mform">${body}
     <div class="modal-actions">
       <button type="button" class="btn ghost" onclick="closeModal()">Cancel</button>
       <button class="btn primary" type="submit">${esc(submitLabel)}</button>
@@ -620,35 +620,95 @@ async function viewSquads() {
 
 async function uiSquadGit(squadId) {
   const squad = S.squads.find((s) => s.id === squadId);
-  const canConnect = isExec() || (isPM() && mySquads().some((s) => s.id === squadId));
-  openModal('GitHub · ' + esc(squad?.name || 'Squad'), `
-    <div id="git-body"><div class="empty">Loading repository activity…</div></div>
-    ${canConnect ? `<div class="modal-actions" style="justify-content:flex-start"><button class="btn primary" onclick="uiGitConnect('${squadId}')">Connect / change repository</button></div>` : '<div class="muted" style="font-size:11.5px;margin-top:8px">Only the squad PM or C-level can connect the repository.</div>'}`, true);
-  await refreshGitFeed(squadId);
+  openModal('GitHub · ' + esc(squad?.name || 'Squad'), `<div id="git-body"><div class="empty">Loading repositories…</div></div>`, true);
+  if (!S._gitSel) S._gitSel = {};
+  await gitLoad(squadId);
 }
 
-async function refreshGitFeed(squadId) {
+async function gitLoad(squadId) {
   const body = document.getElementById('git-body');
   if (!body) return;
+  const canManage = isExec() || (isPM() && mySquads().some((s) => s.id === squadId));
   try {
-    const r = await api('GET', `/squads/${squadId}/github/activity`);
+    const repos = await api('GET', `/squads/${squadId}/github/repos`);
+    if (!repos.length) {
+      body.innerHTML = `<div class="empty">No repositories connected yet.</div>
+        ${canManage ? '<div class="modal-actions" style="justify-content:flex-start"><button class="btn primary" onclick="uiGitAdd(\'' + squadId + '\')">+ Add repository</button></div>' : ''}`;
+      return;
+    }
+    if (!repos.find((r) => r.id === S._gitSel[squadId])) S._gitSel[squadId] = repos[0].id;
     body.innerHTML = `
-      <div class="muted" style="font-size:12px;margin-bottom:8px">${esc(r.repoUrl)} · <button class="btn sm ghost" onclick="refreshGitFeed('${squadId}')">↻ refresh</button></div>
-      ${r.commits.map((c) => `<div class="commit">
-        <div class="msg"><span class="sha">${esc(c.sha)}</span> ${esc(c.message)}</div>
-        <div class="meta">${esc(c.author)} · ${dt(c.date)}</div>
-      </div>`).join('') || '<div class="empty">No commits found</div>'}`;
+      <div class="row" style="margin-bottom:12px;gap:6px;flex-wrap:wrap">
+        ${repos.map((r) => `<button class="btn sm ${r.id === S._gitSel[squadId] ? 'primary' : ''}" onclick="gitSelect('${squadId}','${r.id}')">${esc(r.name)}</button>`).join('')}
+        ${canManage ? `<button class="btn sm good" onclick="uiGitAdd('${squadId}')">+ Add</button>
+          <button class="btn sm bad" onclick="uiGitRemove('${squadId}','${S._gitSel[squadId]}')">Remove</button>` : ''}
+      </div>
+      <div id="git-summary" class="muted" style="font-size:12px;margin-bottom:10px">Loading summary…</div>
+      <div id="git-commits"><div class="empty">Loading commits…</div></div>`;
+    const sel = S._gitSel[squadId];
+    api('GET', `/squads/${squadId}/github/repos/${sel}/summary`)
+      .then((s) => { const el = document.getElementById('git-summary'); if (el) el.innerHTML = gitSummaryHtml(s); })
+      .catch((e) => { const el = document.getElementById('git-summary'); if (el) el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; });
+    api('GET', `/squads/${squadId}/github/repos/${sel}/activity`)
+      .then((a) => { const el = document.getElementById('git-commits'); if (el) el.innerHTML = `
+        <div class="muted" style="font-size:11.5px;margin-bottom:6px">Last ${a.commits.length} commits · <button class="btn sm ghost" onclick="gitLoad('${squadId}')">↻ refresh</button></div>
+        ${a.commits.map((c) => `<div class="commit"><div class="msg"><span class="sha">${esc(c.sha)}</span> ${esc(c.message)}</div><div class="meta">${esc(c.author)} · ${dt(c.date)}</div></div>`).join('') || '<div class="empty">No commits</div>'}`; })
+      .catch((e) => { const el = document.getElementById('git-commits'); if (el) el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; });
   } catch (e) {
     body.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
   }
 }
 
-function uiGitConnect(squadId) {
+function gitSummaryHtml(s) {
+  const kb = (n) => n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n > 1024 ? Math.round(n / 1024) + ' KB' : n + ' B';
+  return `<div class="git-summary">
+    ${s.description ? `<div class="muted" style="font-size:12.5px;margin-bottom:8px">${esc(s.description)}</div>` : ''}
+    <div class="statrow">
+      <span>${badge('★ ' + s.stars, 'b-gold')}</span>
+      <span>${badge(s.forks + ' forks', 'b-blue')}</span>
+      <span>${badge(s.openIssues + ' issues', s.openIssues > 10 ? 'b-yellow' : 'b-gray')}</span>
+      <span>${badge('code ~' + kb(s.codeSizeBytes), 'b-green')}</span>
+      <span>${badge(s.contributorCount + ' contributors', 'b-blue')}</span>
+    </div>
+    ${s.stack?.length ? `<div class="stackbar" style="margin-top:10px">${s.stack.slice(0, 6).map((l) => `<span class="lang" style="flex:${Math.max(l.share, 1)}" title="${esc(l.language)} ${l.share}%">${esc(l.language)} <b>${l.share}%</b></span>`).join('')}</div>` : ''}
+    ${s.contributors?.length ? `<div style="margin-top:10px" class="row">${s.contributors.slice(0, 12).map((c) =>
+      `<span class="contrib"><img src="${esc(c.avatarUrl || '')}" onerror="this.style.display='none'"/> ${esc(c.login)} <b>${c.contributions}</b></span>`).join('')}</div>` : ''}
+    <div class="muted" style="font-size:11px;margin-top:8px">default branch ${esc(s.defaultBranch || '—')} · last push ${dt(s.lastPushAt)}</div>
+  </div>`;
+}
+
+function gitSelect(squadId, repoId) { S._gitSel[squadId] = repoId; gitLoad(squadId); }
+
+const PAT_HELP = `<details style="margin-bottom:12px"><summary class="muted" style="cursor:pointer;font-size:12.5px">🔒 How to get a Personal Access Token (for private repos) — click to expand</summary>
+<ol class="muted" style="font-size:12px;line-height:1.7;padding-left:16px">
+  <li>On GitHub, click your <b>avatar (top-right) → Settings</b></li>
+  <li>Scroll the left menu to the bottom → <b>Developer settings</b></li>
+  <li><b>Personal access tokens → Tokens (classic)</b> → <b>Generate new token (classic)</b></li>
+  <li>Give it a note (e.g. "Pointfex ERP"), choose an expiry</li>
+  <li>Under <b>Select scopes</b>, tick <b>repo</b> (full control of private repositories)</li>
+  <li>Click <b>Generate token</b> → copy the <span class="mono">ghp_…</span> value immediately (shown only once)</li>
+  <li>Paste it in the token field below. It is stored server-side, per repository.</li>
+</ol></details>`;
+
+function uiGitAdd(squadId) {
   formModal('Connect GitHub repository', [
     { name: 'repoUrl', label: 'Repository URL', required: true, placeholder: 'https://github.com/pointfex/squad-1' },
-    { name: 'token', label: 'Personal Access Token (optional — needed for private repos)', placeholder: 'ghp_…' },
+    { name: 'name', label: 'Display name (optional)', placeholder: 'pointfex.com' },
+    { name: 'token', label: 'Personal Access Token (private repos only)', placeholder: 'ghp_…' },
   ], 'Connect', async (d) => {
-    await api('PUT', `/squads/${squadId}/github`, { repoUrl: d.repoUrl, token: d.token || undefined });
+    await api('POST', `/squads/${squadId}/github/repos`, { repoUrl: d.repoUrl, name: d.name || undefined, token: d.token || undefined });
+    closeModal();
+    await uiSquadGit(squadId);
+  }, false, PAT_HELP);
+}
+
+function uiGitRemove(squadId, repoId) {
+  formModal('Remove repository', [
+    { name: 'confirm', label: 'Type "remove" to confirm', required: true },
+  ], 'Remove', async (d) => {
+    if (d.confirm !== 'remove') throw new Error('Type "remove" to confirm');
+    await api('DELETE', `/squads/${squadId}/github/repos/${repoId}`);
+    S._gitSel[squadId] = null;
     closeModal();
     await uiSquadGit(squadId);
   });

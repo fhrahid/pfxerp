@@ -84,6 +84,24 @@ Dokploy → your PostgreSQL database → **Backups** → S3-compatible endpoint:
 - [ ] Enable the 6-hourly database backups
 - [ ] Optional: remove the `ports: "127.0.0.1:5432:5432"` mapping from docker-compose (Path B) — Dokploy's internal network is enough
 
+## Deploying the web console (frontend)
+
+The Next.js console lives in `frontend/` (Dockerfile included, port **3001**).
+
+1. **Applications → Dockerfile** → same GitHub repo → branch `main`
+2. **Root directory:** `frontend`
+3. **Port:** `3001`
+4. **Environment** (must be set before build — it's inlined into the bundle):
+
+   ```env
+   NEXT_PUBLIC_API_URL=https://erp.pointfex.com
+   ```
+
+5. Deploy, then attach a domain (e.g. `app.pointfex.com`) — SSL is automatic.
+6. Open `https://app.pointfex.com` and sign in with your ERP credentials.
+
+> The API (`erp.pointfex.com`) allows cross-origin requests from the console. The old dark console served by the API at `/` remains available as a fallback.
+
 ## Troubleshooting
 
 | Symptom | Fix |
