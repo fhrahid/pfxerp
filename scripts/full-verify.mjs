@@ -9,6 +9,7 @@
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { createNoticeKeys, encryptNotice, signNotice } from './notice-crypto.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DBQ_SCRIPT = join(__dirname, 'dbq.cjs');
@@ -119,6 +120,10 @@ const d14 = await login('dev1_4@seu.edu.bd');
 const d21 = await login('dev2_1@seu.edu.bd');
 const d22 = await login('dev2_2@seu.edu.bd');
 const d31 = await login('dev3_1@seu.edu.bd');
+const cpoNoticeKeys = createNoticeKeys();
+const d14NoticeKeys = createNoticeKeys();
+await api(cpo.token, 'POST', '/notices/keys/register', { publicKey: JSON.stringify(cpoNoticeKeys.publicKey) });
+await api(d14.token, 'POST', '/notices/keys/register', { publicKey: JSON.stringify(d14NoticeKeys.publicKey) });
 
 /* ============================================================= AUTH (security.md) */
 section('AUTH — security.md §2');
@@ -372,18 +377,23 @@ await test('BR-CHRO-16..19: slacker fine 2000 → 500 CPO + 400 CFO + 1100 reser
 section('NOTICES — chro.md BR-CHRO-11..15 (zero-knowledge)');
 await test('BR-CHRO-12/13: dispatch stores ciphertext+signature only; DB has no plaintext', async () => {
   const secret = 'Your commit activity requires improvement immediately.';
+  const recipientId = userId('dev1_4@seu.edu.bd');
+  const title = 'Disciplinary citation lab 5';
+  const category = 'DISCIPLINARY';
+  const recipient = await api(cpo.token, 'GET', `/notices/keys/${recipientId}`);
+  const encryptedContent = encryptNotice(secret, recipient.publicKey);
   const r = await api(cpo.token, 'POST', '/notices', {
-    recipientId: userId('dev1_4@seu.edu.bd'), title: 'Disciplinary citation lab 5', category: 'DISCIPLINARY',
-    encryptedContent: Buffer.from(secret).toString('base64'), signature: Buffer.from('sig-' + Date.now()).toString('base64'),
+    recipientId, title, category, encryptedContent,
+    signature: signNotice(cpoNoticeKeys, JSON.stringify([recipientId, title, category, encryptedContent])),
   });
   const stored = dbq(`SELECT "encryptedContent" FROM "Notice" WHERE id='${r.noticeId}'`);
-  assert(!stored.includes(secret) && stored.includes(Buffer.from(secret).toString('base64').slice(0, 10)), 'plaintext leaked or ciphertext wrong');
+  assert(!stored.includes(secret) && stored.includes(encryptedContent.slice(0, 10)), 'plaintext leaked or ciphertext wrong');
 });
 await test('BR-CHRO-15: signed acknowledgment + double-ack blocked', async () => {
   const mine = await api(d14.token, 'GET', '/notices');
   const n = mine.find((x) => x.status === 'DISPATCHED');
   assert(n, 'no dispatched notice found');
-  await api(d14.token, 'POST', `/notices/${n.id}/acknowledge`, { acknowledgmentSignature: Buffer.from('ack-' + Date.now()).toString('base64') });
+  await api(d14.token, 'POST', `/notices/${n.id}/acknowledge`, { acknowledgmentSignature: signNotice(d14NoticeKeys, `ack:${n.id}`) });
   await expectStatus(d14.token, 'POST', `/notices/${n.id}/acknowledge`, { acknowledgmentSignature: 'x'.repeat(20) }, 400, 'double ack');
 });
 await test('BR: developer cannot dispatch notices (403)', async () => {

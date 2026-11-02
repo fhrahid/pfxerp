@@ -108,13 +108,12 @@ $fine = (Api POST 'fines/slacker' $cpo.accessToken @{ targetUserId=$dev.userId; 
 Write-Host "== slacker fine: $($fine.fineAmount) (cpo=$($fine.cpoBounty), reserve=$($fine.reserveDeposit))"
 
 # ---- NOTICE (E2EE ciphertext passthrough) ----
-$notice = (Api POST 'notices' $cpo.accessToken @{
-  recipientId=$dev.userId; title='Disciplinary citation'; category='DISCIPLINARY';
-  encryptedContent='ZW5jcnlwdGVkLXBheWxvYWQtdGVzdA=='; signature='c2lnbmF0dXJlLXRlc3QtMTIzNDU2Nzg5MA=='
-}).data
-Write-Host "== notice dispatched: $($notice.noticeId)"
-$ack = (Api POST "notices/$($notice.noticeId)/acknowledge" $dev1.accessToken @{ acknowledgmentSignature='YWNrLXNpZ25hdHVyZS0xMjM0NTY3ODkw' }).data
-Write-Host "== notice acknowledged: $($ack.status)"
+$env:BASE_URL = $base
+$env:CPO_TOKEN = $cpo.accessToken
+$env:NOTICE_RECIPIENT_ID = $dev1.user.id
+$env:NOTICE_RECIPIENT_TOKEN = $dev1.accessToken
+node scripts/notice-smoke.mjs
+if ($LASTEXITCODE -ne 0) { throw 'Encrypted notice smoke flow failed' }
 
 # ---- MARKETPLACE ----
 $listing = (Api POST 'cto/marketplace/listings' $cto.accessToken @{ title='NestJS Clean Architecture Starter'; price=6000; description='Production grade starter'; repositoryUrl='https://github.com/pointfex/starter' }).data

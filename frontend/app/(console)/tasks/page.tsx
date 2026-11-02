@@ -100,7 +100,7 @@ export default function TasksPage() {
 }
 
 function TaskCard({ task: t }: { task: any }) {
-  const isOverdue = t.isOverdue || (t.dueDate && new Date(t.dueDate) < new Date() && t.status !== "CLOSED");
+  const isOverdue = t.isOverdue || (t.dueDate && new Date(t.dueDate) < new Date() && !["CTO_VERIFIED", "CLOSED"].includes(t.status));
   const completedLate = Boolean(t.completedLate);
 
   return (
@@ -145,7 +145,7 @@ function TaskDetail({ id }: { id: string }) {
   if (task.isLoading) return <Skeleton className="h-40 w-full" />;
   const t = task.data;
   if (!t) return null;
-  const isOverdue = t.isOverdue || (t.dueDate && new Date(t.dueDate) < new Date() && t.status !== "CLOSED");
+  const isOverdue = t.isOverdue || (t.dueDate && new Date(t.dueDate) < new Date() && !["CTO_VERIFIED", "CLOSED"].includes(t.status));
   const completedLate = Boolean(t.completedLate);
 
   return (

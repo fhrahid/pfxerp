@@ -78,12 +78,8 @@ export class PayrollController {
   /** API-CHRO-02. */
   @Post('payroll/:id/approve')
   @Roles(UserRole.CPO)
-  approve(
-    @Param('id') id: string,
-    @CurrentUser() user: AuthUser,
-    @Headers('x-idempotency-key') idem?: string,
-  ) {
-    return this.payroll.approveAndDisburse(user.id, id, idem || '');
+  approve(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.payroll.approveAndDisburse(user.id, id);
   }
 
   @Post('payroll/:id/reject')

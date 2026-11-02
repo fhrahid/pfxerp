@@ -11,6 +11,7 @@ import { PrismaClient } from '@prisma/client';
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
+  app.set('trust proxy', 'loopback, linklocal, uniquelocal');
   app.setGlobalPrefix(process.env.API_PREFIX || 'api/v1');
   app.enableCors({ origin: true, credentials: true });
   app.useGlobalPipes(

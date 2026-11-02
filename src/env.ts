@@ -25,3 +25,18 @@ export function loadEnv(): void {
 }
 
 loadEnv();
+
+if (process.env.NODE_ENV === 'production') {
+  if (process.env.JWT_SECRET && process.env.JWT_SECRET === process.env.LEDGER_SECRET_KEY) {
+    throw new Error('JWT_SECRET and LEDGER_SECRET_KEY must be different values');
+  }
+  for (const key of ['JWT_SECRET', 'LEDGER_SECRET_KEY']) {
+    const value = process.env[key];
+    if (!value || value.length < 64 || value.startsWith('replace_with_') || value.startsWith('dev_')) {
+      throw new Error(`${key} must be set to a unique secret of at least 64 characters in production`);
+    }
+  }
+  if (process.env.AUTO_SEED === 'true' && !process.env.INITIAL_CEO_PASSWORD) {
+    throw new Error('INITIAL_CEO_PASSWORD must be set when production auto-seeding is enabled');
+  }
+}

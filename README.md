@@ -22,7 +22,7 @@ docker compose exec api node dist/prisma/seed.js   # genesis seeding
 ```bash
 cp .env.example .env          # point DATABASE_URL at your database
 npm install
-npm run db:setup              # prisma db push + seed
+npm run db:setup              # apply migrations + seed
 npm run dev                   # ts-node dev server on :3000
 ```
 
@@ -114,7 +114,8 @@ Three end-to-end suites ship in `scripts/` (run against a freshly seeded DB):
 
 ```powershell
 # 1. full business-rule verification — every BR in all 9 spec files, all 6 roles
-docker compose exec api npx prisma db push --force-reset --skip-generate
+# Destructive: use only with a disposable local verification database.
+docker compose exec api npx prisma migrate reset --force --skip-seed
 docker compose exec api node dist/prisma/seed.js
 node scripts/full-verify.mjs          # 90/90 checks incl. exact ledger math, chain tamper detection, conservation
 

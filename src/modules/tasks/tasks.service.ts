@@ -6,6 +6,7 @@ import { ChaosService } from '../chaos/chaos.service';
 import { AuditService } from '../audit/audit.service';
 import { SettingsService } from '../settings/settings.service';
 import { AuthUser, isExecRole, isBoardRole, isOverrideRole } from '../../common/types';
+import { Cron, CronExpression } from '@nestjs/schedule';
 
 const ALLOWED: Record<TaskStatus, TaskStatus[]> = {
   BACKLOG: ['TODO'],
@@ -202,6 +203,24 @@ export class TasksService {
         ctoOverrideCount: ctoOverrides,
       },
     });
+  }
+
+  // shortcut: runs in the single API process; move to a distributed queue before adding replicas.
+  @Cron(CronExpression.EVERY_6_HOURS)
+  async refreshPerformanceSnapshots() {
+    const sprint = await this.sprintNumber();
+    const [developers, pmMemberships] = await Promise.all([
+      this.prisma.user.findMany({ where: { role: UserRole.DEVELOPER, isActive: true }, select: { id: true } }),
+      this.prisma.squadMembership.findMany({
+        where: { role: 'PM', leftAt: null, user: { isActive: true } },
+        select: { userId: true, squadId: true },
+      }),
+    ]);
+
+    await Promise.all([
+      ...developers.map(({ id }) => this.recomputeDevDpi(id, sprint)),
+      ...pmMemberships.map(({ userId, squadId }) => this.recomputePmPmhi(userId, squadId, sprint)),
+    ]);
   }
 
   async createTask(user: AuthUser, dto: {

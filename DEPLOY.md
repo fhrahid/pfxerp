@@ -40,13 +40,23 @@ git push -u origin main
    DATABASE_URL=postgresql://pointfex:<password>@<dokploy-postgres-host>:5432/pointfex?schema=public
    JWT_SECRET=<64+ random chars — e.g. openssl rand -hex 48>
    LEDGER_SECRET_KEY=<different 64+ random chars>
+   INITIAL_CEO_EMAIL=noor@seu.edu.bd
+   INITIAL_CEO_PASSWORD=<one-time strong password>
    AUTO_SEED=true
    NODE_ENV=production
    ```
 
    > `AUTO_SEED=true` makes the first boot create the CEO/executives/6 squads/৳5.6M genesis automatically (it only seeds when the user table is empty, so restarts are safe).
 
-5. **Deploy.** The container runs `prisma db push` then starts the API on `:3000`.
+5. **Deploy.** The container applies committed Prisma migrations, then starts the API on `:3000`.
+
+   For an existing database created with the old `db push` startup, first confirm its schema matches the current Prisma schema and take a backup. Then baseline the initial migration once from a checkout of this release with the production `DATABASE_URL` set:
+
+   ```bash
+   npx prisma migrate resolve --applied 20261102000000_initial
+   ```
+
+   New databases must not be baselined; `migrate deploy` creates them from the initial migration.
 
 ### 3. Domain + HTTPS
 1. Application → **Domains** → add `pointfex.yourdomain.com`
@@ -55,7 +65,7 @@ git push -u origin main
 ### 4. First login
 - Console: `https://pointfex.yourdomain.com/`
 - API docs: `https://pointfex.yourdomain.com/api/docs`
-- CEO: `noor@seu.edu.bd` / `PointfexCeo2026!` — **change this immediately** (see §4 below).
+- CEO: use the `INITIAL_CEO_EMAIL` and `INITIAL_CEO_PASSWORD` values set for the application. Change the initial password after first login.
 
 ### 5. Backups (main.md §5.3)
 Dokploy → your PostgreSQL database → **Backups** → S3-compatible endpoint:
@@ -69,7 +79,7 @@ Dokploy → your PostgreSQL database → **Backups** → S3-compatible endpoint:
 ## Path B — Compose deployment
 
 1. Project → **Compose** → new service, point it at the same repo/branch.
-2. Set the same `JWT_SECRET`, `LEDGER_SECRET_KEY`, plus `AUTO_SEED=true` and a strong `DB_PASSWORD`.
+2. Set `NODE_ENV=production`, `JWT_SECRET`, `LEDGER_SECRET_KEY`, `INITIAL_CEO_PASSWORD`, `AUTO_SEED=true`, and a strong `DB_PASSWORD`.
 3. Deploy. `docker-compose.yml` brings up `postgres` (with healthcheck) + `api` on port 3000.
 4. Add a reverse-proxy/domain pointing at port `3000` (or add Traefik labels to the `api` service).
 
@@ -77,7 +87,7 @@ Dokploy → your PostgreSQL database → **Backups** → S3-compatible endpoint:
 
 ## Post-deploy hardening checklist
 
-- [ ] Change the CEO password (seeded `PointfexCeo2026!`) — update faculty credentials before the first lab
+- [ ] Change the initial CEO password — update faculty credentials before the first lab
 - [ ] Rotate all seeded member passwords (`Pointfex2026!`) or hand them out as one-time credentials
 - [ ] Confirm `JWT_SECRET` / `LEDGER_SECRET_KEY` are 64+ random chars (never reuse the dev defaults)
 - [ ] Verify `POST /api/v1/ledger/verify-chain` returns `VALID` after first boot

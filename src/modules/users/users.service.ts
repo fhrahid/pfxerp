@@ -177,7 +177,7 @@ export class UsersService {
    * Detailed profile view including work history, performance metrics (DPI/PMHI),
    * and missed deadline / overdue tracking.
    */
-  async getUserProfile(userId: string) {
+  async getUserProfile(userId: string, includeWalletBalance: boolean) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       include: {
@@ -438,7 +438,7 @@ export class UsersService {
     return {
       ...this.safe(user),
       createdAt: user.createdAt,
-      walletBalance: user.account ? Number(user.account.balance) : 0,
+      ...(includeWalletBalance ? { walletBalance: user.account ? Number(user.account.balance) : 0 } : {}),
       squadMemberships: user.squadMemberships,
       stats: {
         totalAssigned,

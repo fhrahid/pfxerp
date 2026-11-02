@@ -2,6 +2,7 @@ import { Body, Controller, Get, Headers, HttpCode, Post } from '@nestjs/common';
 import { IsEmail, IsNotEmpty, IsString, MinLength } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { Public, CurrentUser } from '../../common/decorators';
 import { AuthService } from './auth.service';
 import { AuthUser } from '../../common/types';
@@ -48,6 +49,7 @@ export class AuthController {
   ) {}
 
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @HttpCode(200)
   @Post('login')
   login(@Body() dto: LoginDto) {
@@ -68,6 +70,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @HttpCode(200)
   @Post('forgot-password')
   forgotPassword(@Body() dto: ForgotPasswordDto, @Headers('x-internal-test-key') testKey?: string) {

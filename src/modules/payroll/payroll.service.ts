@@ -103,8 +103,8 @@ export class PayrollService {
   }
 
   /** API-CHRO-02: approve + atomic batch disbursement (idempotent replay per main.md §7.3). */
-  async approveAndDisburse(cpoUserId: string, proposalId: string, idempotencyKey: string) {
-    const replayKey = idempotencyKey || `payroll_${proposalId}`;
+  async approveAndDisburse(cpoUserId: string, proposalId: string) {
+    const replayKey = `payroll_${proposalId}`;
 
     // Idempotent replay: if this exact key already settled the ledger, return the original outcome
     const existingTx = await this.prisma.ledgerTransaction.findUnique({
@@ -112,6 +112,13 @@ export class PayrollService {
       include: { entries: true },
     });
     if (existingTx && existingTx.referenceId === proposalId) {
+      const proposal = await this.prisma.payrollProposal.findUnique({ where: { id: proposalId }, select: { status: true } });
+      if (!proposal) throw new NotFoundException('Proposal not found');
+      if (proposal.status === 'REJECTED') throw new AppException('CONFLICT', 'A rejected proposal has a settled payroll transaction');
+      await this.prisma.payrollProposal.updateMany({
+        where: { id: proposalId, status: 'SUBMITTED' },
+        data: { status: 'APPROVED', approvedById: existingTx.authorizedById },
+      });
       const credits = existingTx.entries.filter((e) => e.direction === 'CREDIT');
       return {
         proposalId,
@@ -123,74 +130,78 @@ export class PayrollService {
       };
     }
 
-    const proposal = await this.prisma.payrollProposal.findUnique({
-      where: { id: proposalId },
-      include: { squad: { include: { account: true } }, lineItems: { include: { user: { include: { account: true } } } } },
-    });
-    if (!proposal) throw new NotFoundException('Proposal not found');
-    if (proposal.status !== 'SUBMITTED') {
-      throw new AppException('PAYROLL_ALREADY_APPROVED', `Proposal is ${proposal.status}`);
-    }
-    if (!proposal.squad.account) throw new BadRequestException('Squad treasury account missing');
+    const result = await this.prisma.$transaction(async (tx) => {
+      const proposal = await tx.payrollProposal.findUnique({
+        where: { id: proposalId },
+        include: { squad: { include: { account: true } }, lineItems: { include: { user: { include: { account: true } } } } },
+      });
+      if (!proposal) throw new NotFoundException('Proposal not found');
+      if (!proposal.squad.account) throw new BadRequestException('Squad treasury account missing');
 
-    const paidItems = proposal.lineItems.filter((i) => Number(i.amount) > 0);
-    for (const item of paidItems) {
-      if (!item.user.account) throw new BadRequestException(`User ${item.userId} has no personal wallet`);
-    }
+      const paidItems = proposal.lineItems.filter((i) => Number(i.amount) > 0);
+      for (const item of paidItems) {
+        if (!item.user.account) throw new BadRequestException(`User ${item.userId} has no personal wallet`);
+      }
 
-    const total = Number(proposal.totalProposed);
-    const treasury = await this.ledger.squadTreasury(proposal.squadId);
+      const claimed = await tx.payrollProposal.updateMany({
+        where: { id: proposalId, status: 'SUBMITTED' },
+        data: { status: 'APPROVED', approvedById: cpoUserId },
+      });
+      if (!claimed.count) throw new AppException('PAYROLL_ALREADY_APPROVED', `Proposal is ${proposal.status}`);
 
-    await this.ledger.postTransaction({
-      entries: [
-        { accountId: treasury.id, direction: 'DEBIT', amount: total },
-        ...paidItems.map((i) => ({
-          accountId: i.user.account!.id,
-          direction: 'CREDIT' as const,
-          amount: Number(i.amount),
-        })),
-      ],
-      referenceType: 'PAYROLL',
-      referenceId: proposal.id,
-      description: `Lab ${proposal.labNumber} payroll batch for ${proposal.squad.name}`,
-      idempotencyKey: replayKey,
-      authorizedById: cpoUserId,
-    });
+      const total = Number(proposal.totalProposed);
+      const treasury = proposal.squad.account;
+      const accountIds = [treasury.id, ...paidItems.map((item) => item.user.account!.id)];
+      await this.ledger.postTransaction({
+        entries: [
+          { accountId: treasury.id, direction: 'DEBIT', amount: total },
+          ...paidItems.map((i) => ({
+            accountId: i.user.account!.id,
+            direction: 'CREDIT' as const,
+            amount: Number(i.amount),
+          })),
+        ],
+        referenceType: 'PAYROLL',
+        referenceId: proposal.id,
+        description: `Lab ${proposal.labNumber} payroll batch for ${proposal.squad.name}`,
+        idempotencyKey: replayKey,
+        authorizedById: cpoUserId,
+      }, tx);
 
-    const updated = await this.prisma.payrollProposal.update({
-      where: { id: proposalId },
-      data: { status: 'APPROVED', approvedById: cpoUserId },
-    });
-
-    await this.prisma.executiveAuditLog.create({
-      data: {
-        executiveId: cpoUserId,
-        executiveRole: 'CPO',
-        actionType: 'APPROVE_PAYROLL',
-        payloadSnapshot: {
-          proposalId,
-          squadId: proposal.squadId,
-          squadName: proposal.squad.name,
-          labNumber: proposal.labNumber,
-          totalDisbursed: total,
-          recipientsCount: paidItems.length,
+      await tx.executiveAuditLog.create({
+        data: {
+          executiveId: cpoUserId,
+          executiveRole: 'CPO',
+          actionType: 'APPROVE_PAYROLL',
+          payloadSnapshot: {
+            proposalId,
+            squadId: proposal.squadId,
+            squadName: proposal.squad.name,
+            labNumber: proposal.labNumber,
+            totalDisbursed: total,
+            recipientsCount: paidItems.length,
+          },
+          riskSeverity: 'INFO',
         },
-        riskSeverity: 'INFO',
-      },
-    }).catch(() => {});
+      });
 
-    this.events.emitToRoom(this.events.squadRoom(proposal.squadId), 'payroll:executed', {
-      proposalId: proposal.id,
-      labNumber: proposal.labNumber,
-      totalDisbursed: total,
+      return { proposal, paidItems, total, accountIds };
+    });
+
+    await this.ledger.publishBalanceUpdates(result.accountIds);
+
+    this.events.emitToRoom(this.events.squadRoom(result.proposal.squadId), 'payroll:executed', {
+      proposalId: result.proposal.id,
+      labNumber: result.proposal.labNumber,
+      totalDisbursed: result.total,
     });
 
     return {
-      proposalId: updated.id,
-      status: updated.status,
-      disbursedAmount: total,
-      recipientsCount: paidItems.length,
-      executedAt: updated.updatedAt,
+      proposalId: result.proposal.id,
+      status: 'APPROVED',
+      disbursedAmount: result.total,
+      recipientsCount: result.paidItems.length,
+      executedAt: new Date(),
     };
   }
 

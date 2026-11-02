@@ -1,5 +1,7 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ScheduleModule } from '@nestjs/schedule';
 
 import { PrismaModule } from './prisma/prisma.module';
 import { EventsModule } from './events/events.module';
@@ -41,6 +43,13 @@ import { RolesModule } from './modules/roles/roles.module';
     PrismaModule,
     EventsModule,
     SettingsModule,
+    // shortcut: single-process storage for the 33-person studio; use Redis before scaling replicas.
+    ThrottlerModule.forRoot([{
+      ttl: 60_000,
+      limit: 500,
+      skipIf: () => process.env.NODE_ENV !== 'production',
+    }]),
+    ScheduleModule.forRoot(),
     MailModule,
     // Business modules
     AuthModule,
@@ -67,6 +76,7 @@ import { RolesModule } from './modules/roles/roles.module';
     TelemetryModule,
   ],
   providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_FILTER, useClass: HttpExceptionFilter },

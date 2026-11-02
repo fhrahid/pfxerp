@@ -1,19 +1,21 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import * as React from "react";
 import { Send } from "lucide-react";
 import { api, ROLES } from "@/lib/api";
-import { useAction, useMe } from "@/components/shell";
+import { useMe } from "@/components/shell";
 import { FormDialog } from "@/components/form-dialog";
 import { Button } from "@/components/ui/button";
 import { Badge, statusVariant } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { dt } from "@/lib/utils";
+import { decryptNotice, encryptNotice, ensureNoticeKeys, noticeSignatureMessage, signNotice } from "@/lib/notice-crypto";
+import { toast } from "sonner";
 
 export default function NoticesPage() {
   const me = useMe();
-  const action = useAction();
   const role = me.data?.role || "";
 
   const notices = useQuery({ queryKey: ["notices"], queryFn: () => api<any[]>("GET", "/notices") });
@@ -23,13 +25,20 @@ export default function NoticesPage() {
     enabled: ROLES.isCPO(role) || ROLES.isCEO(role),
   });
 
+  React.useEffect(() => {
+    if (!me.data?.id) return;
+    ensureNoticeKeys(me.data.id).catch((error) => {
+      toast.error((error as Error).message || "Secure notice keys could not be set up in this browser");
+    });
+  }, [me.data?.id]);
+
   return (
     <div className="space-y-4">
       {ROLES.isCPO(role) || ROLES.isCEO(role) ? (
         <FormDialog
           trigger={<Button size="sm" className="gap-1.5"><Send className="h-4 w-4" /> Dispatch notice</Button>}
           title="Dispatch encrypted notice"
-          description="Encrypted client-side — the server stores only ciphertext."
+          description="The message is encrypted and signed in this browser. Keep your local browser keys available to read notices later."
           fields={[
             {
               name: "recipientId",
@@ -47,13 +56,15 @@ export default function NoticesPage() {
             { name: "message", label: "Message", type: "textarea", required: true, value: "Your lab attendance and commit activity require immediate improvement." },
           ]}
           submitLabel="Encrypt & dispatch"
-          onSubmit={(d) => {
-            const { message, ...rest } = d;
-            return api("POST", "/notices", {
-              ...rest,
-              encryptedContent: btoa(unescape(encodeURIComponent(message))),
-              signature: btoa(`ed25519-sig-${Date.now()}`),
-            });
+          onSubmit={async (d) => {
+            if (!me.data?.id) throw new Error("Could not identify the signed-in user");
+            const recipient = await api<{ publicKey: string | null }>("GET", `/notices/keys/${d.recipientId}`);
+            if (!recipient.publicKey) throw new Error("Recipient must register notice keys before receiving an encrypted notice");
+            await ensureNoticeKeys(me.data.id);
+            const encryptedContent = await encryptNotice(d.message, recipient.publicKey);
+            const signature = await signNotice(me.data.id, noticeSignatureMessage(d.recipientId, d.title, d.category, encryptedContent));
+            const { message: _message, ...rest } = d;
+            return api("POST", "/notices", { ...rest, encryptedContent, signature });
           }}
         />
       ) : null}
@@ -80,25 +91,19 @@ export default function NoticesPage() {
                     fields={[]}
                     submitLabel="Close"
                     onSubmit={() => undefined}
-                    extra={
-                      <div className="whitespace-pre-wrap rounded-lg border bg-muted/40 p-4 text-sm">
-                        {(() => {
-                          try {
-                            return atob(n.encryptedContent);
-                          } catch {
-                            return n.encryptedContent;
-                          }
-                        })()}
-                      </div>
-                    }
+                    extra={<DecryptedNotice userId={me.data?.id} encryptedContent={n.encryptedContent} />}
                   />
                   {n.status !== "ACKNOWLEDGED" ? (
                     <FormDialog
                       trigger={<Button size="sm" variant="success">Acknowledge</Button>}
                       title="Sign acknowledgment"
-                      fields={[{ name: "acknowledgmentSignature", label: "ACK signature", value: btoa(`ack-${me.data?.id}-${Date.now()}`) }]}
+                      fields={[]}
                       submitLabel="Sign"
-                      onSubmit={(d) => api("POST", `/notices/${n.id}/acknowledge`, d)}
+                      onSubmit={async () => {
+                        if (!me.data?.id) throw new Error("Could not identify the signed-in user");
+                        const acknowledgmentSignature = await signNotice(me.data.id, `ack:${n.id}`);
+                        return api("POST", `/notices/${n.id}/acknowledge`, { acknowledgmentSignature });
+                      }}
                     />
                   ) : null}
                 </div>
@@ -109,6 +114,29 @@ export default function NoticesPage() {
       ) : (
         <div className="rounded-xl border border-dashed py-12 text-center text-sm text-muted-foreground">Inbox is empty</div>
       )}
+    </div>
+  );
+}
+
+function DecryptedNotice({ userId, encryptedContent }: { userId?: string; encryptedContent: string }) {
+  const [plaintext, setPlaintext] = React.useState("");
+  const [error, setError] = React.useState("");
+
+  async function decrypt() {
+    try {
+      if (!userId) throw new Error("Could not identify the signed-in user");
+      setError("");
+      setPlaintext(await decryptNotice(userId, encryptedContent));
+    } catch (e) {
+      setError((e as Error).message || "Unable to decrypt this notice in this browser");
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <Button type="button" variant="outline" onClick={decrypt}>Decrypt in this browser</Button>
+      {error ? <p className="text-sm text-destructive">{error}</p> : null}
+      {plaintext ? <div className="whitespace-pre-wrap rounded-lg border bg-muted/40 p-4 text-sm">{plaintext}</div> : null}
     </div>
   );
 }

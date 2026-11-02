@@ -33,7 +33,7 @@ const GENESIS_HASH = '0'.repeat(64);
  */
 @Injectable()
 export class LedgerService {
-  private readonly secret: string = process.env.LEDGER_SECRET_KEY || 'pointfex-dev-ledger-secret';
+  private readonly secret: string = process.env.LEDGER_SECRET_KEY as string;
 
   constructor(
     private readonly prisma: PrismaService,

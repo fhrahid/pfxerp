@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { EventsGateway } from '../../events/events.gateway';
+import { Cron } from '@nestjs/schedule';
 
 /**
  * Aggregated dashboards (ceo.md §2, other.md §4) + the Simulation Stock Exchange
@@ -71,8 +72,10 @@ export class DashboardService {
   }
 
   /** Recomputes + persists valuations & health for every squad. */
+  @Cron('0 0 * * *', { timeZone: 'UTC' })
   async refreshSquadMetrics() {
-    const burn = await this.settings.getNumber('WEEKLY_LAB_BUDGET', 10000);
+    const defaultBurn = await this.settings.getNumber('WEEKLY_LAB_BUDGET', 10000);
+    const sprintNumber = await this.settings.currentSprint();
     const squads = await this.prisma.squad.findMany({
       where: { isActive: true },
       include: { account: true, borrowedLoans: { where: { status: 'ACTIVE', repaidAt: null } } },
@@ -82,7 +85,33 @@ export class DashboardService {
       squads.map(async (squad) => {
         const balance = squad.account ? Number(squad.account.balance) : 0;
         const valuation = await this.computeValuation(squad.id, balance, squad.account?.id ?? '');
-        const runway = burn > 0 ? balance / burn : 0;
+        const [recentPayrolls, pendingMilestones] = await Promise.all([
+          this.prisma.payrollProposal.findMany({
+            where: { squadId: squad.id, status: 'APPROVED' },
+            orderBy: { labNumber: 'desc' },
+            take: 4,
+            select: { totalProposed: true },
+          }),
+          this.prisma.clientMilestone.findMany({
+            where: { assignedSquadId: squad.id, status: { not: 'PAID' }, contract: { status: 'ACTIVE' } },
+            select: { contractId: true, payoutAmount: true, contract: { select: { escrowBalance: true } } },
+          }),
+        ]);
+        const burn = recentPayrolls.length
+          ? recentPayrolls.reduce((sum, item) => sum + Number(item.totalProposed), 0) / recentPayrolls.length
+          : defaultBurn;
+        const pendingByContract = new Map<string, { pending: number; escrow: number }>();
+        for (const milestone of pendingMilestones) {
+          const current = pendingByContract.get(milestone.contractId) || {
+            pending: 0,
+            escrow: Number(milestone.contract.escrowBalance),
+          };
+          current.pending += Number(milestone.payoutAmount);
+          pendingByContract.set(milestone.contractId, current);
+        }
+        const pendingEscrow = [...pendingByContract.values()]
+          .reduce((sum, contract) => sum + Math.min(contract.pending, contract.escrow), 0);
+        const runway = burn > 0 ? (balance + pendingEscrow) / burn : 0;
         const health = this.healthFor(runway);
 
         if (health === 'BANKRUPT_RISK' && squad.healthStatus !== 'BANKRUPT_RISK') {
@@ -100,6 +129,27 @@ export class DashboardService {
             data: { valuation: new Prisma.Decimal(valuation.toFixed(2)), healthStatus: health },
           });
         }
+
+        await this.prisma.squadHealthSnapshot.upsert({
+          where: { squadId_sprintNumber: { squadId: squad.id, sprintNumber } },
+          create: {
+            squadId: squad.id,
+            sprintNumber,
+            bankBalance: balance,
+            burnRate: burn,
+            runwayPeriods: runway,
+            healthStatus: health,
+            valuation,
+          },
+          update: {
+            bankBalance: balance,
+            burnRate: burn,
+            runwayPeriods: runway,
+            healthStatus: health,
+            valuation,
+            calculatedAt: new Date(),
+          },
+        });
 
         return {
           id: squad.id,

@@ -132,14 +132,14 @@ function UserProfileDetail({ data }: { data: any }) {
           </div>
         </div>
 
-        <div className="text-left sm:text-right shrink-0">
+        {data.walletBalance !== undefined ? <div className="text-left sm:text-right shrink-0">
           <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             Personal Wallet Balance
           </div>
           <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400">
             {taka(data.walletBalance || 0)}
           </div>
-        </div>
+        </div> : null}
       </div>
 
       {/* KPI Stat Cards */}

@@ -8,10 +8,9 @@
     "start": "node dist/src/main.js",
     "dev": "prisma generate && ts-node src/main.ts",
     "prisma:generate": "prisma generate",
-    "prisma:push": "prisma db push",
     "prisma:seed": "ts-node prisma/seed.ts",
     "prisma:seed:dist": "node dist/prisma/seed.js",
-    "db:setup": "npm run prisma:push && npm run prisma:seed"
+    "db:setup": "prisma migrate deploy && npm run prisma:seed"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
@@ -23,7 +22,9 @@
     "@nestjs/passport": "^10.0.3",
     "@nestjs/platform-express": "^10.3.0",
     "@nestjs/platform-socket.io": "^10.3.0",
+    "@nestjs/schedule": "^4.1.2",
     "@nestjs/swagger": "^7.3.0",
+    "@nestjs/throttler": "^6.7.1",
     "@nestjs/websockets": "^10.3.0",
     "@prisma/client": "^5.14.0",
     "bcryptjs": "^2.4.3",

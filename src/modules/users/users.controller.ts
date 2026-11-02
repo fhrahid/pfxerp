@@ -120,7 +120,7 @@ export class UsersController {
         throw new ForbiddenException('AUTHZ_NOT_OWNER');
       }
     }
-    return this.usersService.getUserProfile(id);
+    return this.usersService.getUserProfile(id, isExecRole(user.role) || user.id === id);
   }
 
   /** CPO/CEO: update a profile (rename, role change, password reset, deactivate). */

@@ -45,5 +45,4 @@ USER nestjs
 
 EXPOSE 3000
 
-# v1: deterministic schema sync before HTTP daemon (switch to `prisma migrate deploy` once migrations are committed)
-CMD ["sh", "-c", "npx prisma db push --accept-data-loss && node dist/src/main.js"]
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/src/main.js"]

@@ -1,4 +1,5 @@
-import { BadRequestException, Body, Controller, ForbiddenException, Get, Param, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, ForbiddenException, Get, Param, Post, Query } from '@nestjs/common';
+import { createPublicKey } from 'crypto';
 import { IsEnum, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
 import { NoticeCategory, UserRole } from '@prisma/client';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
@@ -51,35 +52,52 @@ export class NoticesController {
     }
   }
 
-  /** Generates or re-generates an Ed25519 + X25519 keypair bundle for the current user. */
-  @Post('keys/generate')
-  async generateKeys(@CurrentUser() user: AuthUser) {
-    const keys = E2EEUtil.generateUserKeys();
-    const publicBundle = JSON.stringify({
-      ed25519: keys.signing.publicKey,
-      x25519: keys.exchange.publicKey,
-    });
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { publicKey: publicBundle },
-    });
-    return {
-      userId: user.id,
-      publicKeyBundle: publicBundle,
-      privateKeys: keys,
-    };
+  private assertEncryptedEnvelope(value: string) {
+    try {
+      const envelope = JSON.parse(Buffer.from(value, 'base64').toString('utf8'));
+      const ephemeralKey = createPublicKey({
+        key: Buffer.from(envelope.ephemPk || '', 'base64'),
+        format: 'der',
+        type: 'spki',
+      });
+      if (
+        envelope.alg !== 'X25519-AES256GCM' ||
+        ephemeralKey.asymmetricKeyType !== 'x25519' ||
+        Buffer.from(envelope.iv || '', 'base64').length !== 12 ||
+        Buffer.from(envelope.data || '', 'base64').length < 16
+      ) throw new Error('Invalid envelope');
+    } catch {
+      throw new BadRequestException('encryptedContent must be a valid X25519/AES-256-GCM envelope');
+    }
   }
 
-  /** Registers user's client-side generated public key bundle. */
+  /** Registers only keys generated and retained by the user's client. */
   @Post('keys/register')
   async registerKeys(@CurrentUser() user: AuthUser, @Body() body: { publicKey: string }) {
-    if (!body?.publicKey || body.publicKey.length < 16) {
-      throw new BadRequestException('A valid publicKey bundle is required');
+    let bundle: { ed25519?: string; x25519?: string };
+    try {
+      bundle = JSON.parse(body?.publicKey || '');
+      for (const [type, key] of [['ed25519', bundle.ed25519], ['x25519', bundle.x25519]] as const) {
+        const parsed = createPublicKey({ key: Buffer.from(key || '', 'base64'), format: 'der', type: 'spki' });
+        if (parsed.asymmetricKeyType !== type) throw new Error('Wrong key type');
+      }
+    } catch {
+      throw new BadRequestException('A valid Ed25519 and X25519 public key bundle is required');
     }
-    await this.prisma.user.update({
-      where: { id: user.id },
+    const current = await this.prisma.user.findUnique({ where: { id: user.id }, select: { publicKey: true } });
+    if (current?.publicKey && current.publicKey !== body.publicKey) {
+      throw new ConflictException('Notice keys are already registered and cannot be replaced through this endpoint');
+    }
+    const registered = await this.prisma.user.updateMany({
+      where: { id: user.id, publicKey: current?.publicKey ?? null },
       data: { publicKey: body.publicKey },
     });
+    if (!registered.count) {
+      const latest = await this.prisma.user.findUnique({ where: { id: user.id }, select: { publicKey: true } });
+      if (latest?.publicKey !== body.publicKey) {
+        throw new ConflictException('Notice keys changed during registration; reload and try again');
+      }
+    }
     return { registered: true, userId: user.id };
   }
 
@@ -103,20 +121,17 @@ export class NoticesController {
       this.prisma.user.findUnique({ where: { id: user.id } }),
     ]);
     if (!recipient) throw new BadRequestException('Recipient not found');
+    this.assertEncryptedEnvelope(dto.encryptedContent);
 
-    // Cryptographic signature check if sender has an Ed25519 public key registered
+    // Every notice must carry a valid Ed25519 signature from a registered sender key.
     const senderKey = this.getEd25519Key(sender?.publicKey);
-    if (senderKey) {
-      const sigBuf = Buffer.from(dto.signature, 'base64');
-      if (sigBuf.length === 64) {
-        const valid = E2EEUtil.verifySignature(`${dto.title}:${dto.encryptedContent}`, dto.signature, senderKey);
-        if (!valid) throw new BadRequestException('Invalid Ed25519 notice signature');
-      } else {
-        const decoded = sigBuf.toString('utf8');
-        if (!decoded.startsWith('ed25519-sig-') && !decoded.startsWith('sig-')) {
-          throw new BadRequestException('Invalid Ed25519 notice signature');
-        }
-      }
+    if (!senderKey || Buffer.from(dto.signature, 'base64').length !== 64 ||
+        !E2EEUtil.verifySignature(
+          JSON.stringify([dto.recipientId, dto.title, dto.category, dto.encryptedContent]),
+          dto.signature,
+          senderKey,
+        )) {
+      throw new BadRequestException('A valid Ed25519 signature and registered sender key are required');
     }
 
     const notice = await this.prisma.notice.create({
@@ -168,19 +183,10 @@ export class NoticesController {
     if (notice.status === 'ACKNOWLEDGED') throw new BadRequestException('Notice already acknowledged');
 
     const recipientKey = this.getEd25519Key(recipient?.publicKey);
-    if (recipientKey) {
-      const sigBuf = Buffer.from(body.acknowledgmentSignature, 'base64');
-      if (sigBuf.length === 64) {
-        const valid =
-          E2EEUtil.verifySignature(`ack:${id}`, body.acknowledgmentSignature, recipientKey) ||
-          E2EEUtil.verifySignature(id, body.acknowledgmentSignature, recipientKey);
-        if (!valid) throw new BadRequestException('Invalid Ed25519 acknowledgment signature');
-      } else {
-        const decoded = sigBuf.toString('utf8');
-        if (!decoded.startsWith('ack-') && !decoded.startsWith('sig-')) {
-          throw new BadRequestException('Invalid Ed25519 acknowledgment signature');
-        }
-      }
+    const signature = body.acknowledgmentSignature;
+    if (!recipientKey || Buffer.from(signature, 'base64').length !== 64 ||
+        !E2EEUtil.verifySignature(`ack:${id}`, signature, recipientKey)) {
+      throw new BadRequestException('A valid Ed25519 acknowledgment signature and registered recipient key are required');
     }
 
     const updated = await this.prisma.notice.update({
