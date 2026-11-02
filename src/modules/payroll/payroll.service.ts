@@ -187,11 +187,14 @@ export class PayrollService {
     });
   }
 
-  /** API-CHRO-04: slacker fine — BDT 2000 split CPO 500 / reserve 1500 (BR-CHRO-16..19). */
+  /** API-CHRO-04: slacker fine — BDT 2000 split CPO 500 / CFO 400 / reserve 1100 (BR-CHRO-16..19, BR-CFO-penalty). */
   async issueSlackerFine(cpoUserId: string, dto: { targetUserId: string; targetSquadId: string; reason: string }, idempotencyKey: string) {
     const fine = await this.settings.getNumber('SLACKER_FINE', 2000);
     const cpoCut = await this.settings.getNumber('CPO_SLACKER_CUT', 500);
-    const reserveCut = fine - cpoCut;
+    const cfoRate = await this.settings.getNumber('CFO_PENALTY_INCENTIVE', 0.20);
+    const cfoUser = await this.prisma.user.findFirst({ where: { role: 'CFO', isActive: true } });
+    const cfoCut = cfoUser ? Math.round(fine * cfoRate * 100) / 100 : 0;
+    const reserveCut = Math.round((fine - cpoCut - cfoCut) * 100) / 100;
 
     const wallet = await this.prisma.account.findUnique({ where: { ownerId: dto.targetUserId } });
     const treasury = await this.ledger.squadTreasury(dto.targetSquadId);
@@ -206,6 +209,9 @@ export class PayrollService {
     if (fromWallet > 0) entries.push({ accountId: wallet.id, direction: 'DEBIT', amount: fromWallet });
     if (fromSquad > 0) entries.push({ accountId: treasury.id, direction: 'DEBIT', amount: fromSquad });
     entries.push({ accountId: (await this.ledger.personalWallet(cpoUserId)).id, direction: 'CREDIT', amount: cpoCut });
+    if (cfoCut > 0 && cfoUser) {
+      entries.push({ accountId: (await this.ledger.personalWallet(cfoUser.id)).id, direction: 'CREDIT', amount: cfoCut });
+    }
     entries.push({ accountId: (await this.ledger.systemReserve()).id, direction: 'CREDIT', amount: reserveCut });
 
     await this.ledger.postTransaction({
@@ -228,6 +234,7 @@ export class PayrollService {
     return {
       fineAmount: fine,
       cpoBounty: cpoCut,
+      cfoCommission: cfoCut,
       reserveDeposit: reserveCut,
       chargedToWallet: fromWallet,
       chargedToSquadTreasury: fromSquad,

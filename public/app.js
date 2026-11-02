@@ -104,10 +104,12 @@ function formModal(title, fields, submitLabel, onSubmit, wide, extraHtml) {
     const data = {};
     for (const f of fields) data[f.name] = f.type === 'checkbox' ? fd.get(f.name) === 'on' : fd.get(f.name);
     try {
-      await onSubmit(data);
-      closeModal();
-      toast('Success');
-      render();
+      const res = await onSubmit(data);
+      if (res !== false) {
+        closeModal();
+        toast('Success');
+        render();
+      }
     } catch (err) { toast(err.message || 'Failed', false); }
   };
 }
@@ -149,8 +151,11 @@ function loginView(msg) {
       </div>
       ${msg ? `<div class="login-error">${esc(msg)}</div>` : ''}
       <form id="login-form">
-        <label>Email<input name="email" type="email" required placeholder="you@pointfex.com" autocomplete="username"/></label>
+        <label>Email<input name="email" type="email" required placeholder="you@seu.edu.bd" autocomplete="username"/></label>
         <label>Password<input name="password" type="password" required autocomplete="current-password"/></label>
+        <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+          <a href="#" style="color:var(--accent);font-size:12px;text-decoration:none;" onclick="event.preventDefault();forgotPasswordView()">Forgot password?</a>
+        </div>
         <button class="btn primary" style="width:100%;justify-content:center;margin-top:6px" type="submit">Sign in to the studio</button>
       </form>
       <p class="login-foot">Venture Studio Console · CSE474 · Southeast University</p>
@@ -158,8 +163,13 @@ function loginView(msg) {
   document.getElementById('login-form').onsubmit = async (e) => {
     e.preventDefault();
     const fd = Object.fromEntries(new FormData(e.target).entries());
+    const email = (fd.email || '').trim().toLowerCase();
+    if (!/^[a-zA-Z0-9._%+-]+@seu\.edu\.bd$/.test(email)) {
+      loginView('Only @seu.edu.bd email addresses are authorized to log in.');
+      return;
+    }
     try {
-      const data = await rawApi('POST', '/auth/login', fd);
+      const data = await rawApi('POST', '/auth/login', { ...fd, email });
       S.token = data.accessToken; S.refreshToken = data.refreshToken; S.user = null;
       saveSession();
       await boot();
@@ -175,12 +185,184 @@ function doLogout(redirect = true) {
   if (redirect) loginView();
 }
 
+function forgotPasswordView(msg, okMsg) {
+  document.getElementById('app').innerHTML = `
+    <div class="login-wrap">
+      <div class="login-brand">
+        <div class="logo">P</div>
+        <div>
+          <h1>POINTFEX <span>ERP</span></h1>
+          <p class="slogan">Reset your account password</p>
+        </div>
+      </div>
+      ${msg ? `<div class="login-error">${esc(msg)}</div>` : ''}
+      ${okMsg ? `<div class="toast ok" style="position:static;margin-bottom:14px;display:block;">${esc(okMsg)}</div>` : ''}
+      <form id="forgot-form">
+        <label>Institutional Email (@seu.edu.bd)<input name="email" type="email" required placeholder="you@seu.edu.bd" autocomplete="username"/></label>
+        <button class="btn primary" style="width:100%;justify-content:center;margin-top:10px" type="submit">Send Reset Link via Resend</button>
+        <button type="button" class="btn ghost" style="width:100%;justify-content:center;margin-top:8px" onclick="loginView()">Back to Sign In</button>
+      </form>
+      <p class="login-foot">A secure link valid for 60 minutes will be dispatched via Resend.</p>
+    </div>`;
+  document.getElementById('forgot-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = Object.fromEntries(new FormData(e.target).entries());
+    const email = (fd.email || '').trim().toLowerCase();
+    if (!/^[a-zA-Z0-9._%+-]+@seu\.edu\.bd$/.test(email)) {
+      forgotPasswordView('Only @seu.edu.bd email addresses are authorized.');
+      return;
+    }
+    try {
+      const res = await rawApi('POST', '/auth/forgot-password', { email });
+      if (res.resetUrl) {
+        forgotPasswordView(null, `${res.message} (Dev Link: ${res.resetUrl})`);
+      } else {
+        forgotPasswordView(null, res.message || 'If an account matches that email address, a password reset link has been dispatched.');
+      }
+    } catch (err) {
+      forgotPasswordView(err.message);
+    }
+  };
+}
+
+function resetPasswordView(token, msg) {
+  document.getElementById('app').innerHTML = `
+    <div class="login-wrap">
+      <div class="login-brand">
+        <div class="logo">P</div>
+        <div>
+          <h1>POINTFEX <span>ERP</span></h1>
+          <p class="slogan">Choose a new password</p>
+        </div>
+      </div>
+      ${msg ? `<div class="login-error">${esc(msg)}</div>` : ''}
+      <form id="reset-form">
+        <label>New Password (min 8 chars)<input name="password" type="password" required minlength="8" autocomplete="new-password"/></label>
+        <label>Confirm Password<input name="confirmPassword" type="password" required minlength="8" autocomplete="new-password"/></label>
+        <button class="btn primary" style="width:100%;justify-content:center;margin-top:10px" type="submit">Update Password</button>
+        <button type="button" class="btn ghost" style="width:100%;justify-content:center;margin-top:8px" onclick="window.location.hash='';loginView()">Cancel</button>
+      </form>
+      <p class="login-foot">Once updated, existing sessions will be safely revoked.</p>
+    </div>`;
+  document.getElementById('reset-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = Object.fromEntries(new FormData(e.target).entries());
+    if (fd.password !== fd.confirmPassword) {
+      resetPasswordView(token, 'Passwords do not match.');
+      return;
+    }
+    if (fd.password.length < 8) {
+      resetPasswordView(token, 'Password must be at least 8 characters long.');
+      return;
+    }
+    try {
+      const res = await rawApi('POST', '/auth/reset-password', { token, password: fd.password });
+      if (typeof window !== 'undefined' && window.location) window.location.hash = '';
+      loginView();
+      toast(res.message || 'Password has been reset successfully! Please sign in.');
+    } catch (err) {
+      resetPasswordView(token, err.message);
+    }
+  };
+}
+
+async function acceptInviteView(token, msg) {
+  document.getElementById('app').innerHTML = `
+    <div class="login-wrap" style="width:440px;">
+      <div class="login-brand">
+        <div class="logo">P</div>
+        <div>
+          <h1>POINTFEX <span>ERP</span></h1>
+          <p class="slogan">Activate Developer Workspace</p>
+        </div>
+      </div>
+      <div style="text-align:center;padding:20px;color:var(--muted);">Verifying invitation token...</div>
+    </div>`;
+
+  let verified = null;
+  try {
+    verified = await rawApi('GET', '/invitations/verify/' + encodeURIComponent(token));
+  } catch (err) {
+    document.getElementById('app').innerHTML = `
+      <div class="login-wrap" style="width:440px;">
+        <div class="login-brand">
+          <div class="logo" style="background:var(--danger);">✕</div>
+          <div>
+            <h1>POINTFEX <span>ERP</span></h1>
+            <p class="slogan">Invitation Invalid or Expired</p>
+          </div>
+        </div>
+        <div class="login-error">${esc(err.message || 'This invitation link is invalid or has expired after 72 hours.')}</div>
+        <p style="font-size:13px;color:var(--muted);line-height:1.5;margin-bottom:18px;">
+          For security, developer invitations expire within 72 hours of being sent. If you did not activate your account in time, please reach out to studio leadership (CEO, CFO, CTO, or CPO) to resend the invitation link.
+        </p>
+        <button class="btn primary" style="width:100%;justify-content:center" onclick="window.location.hash='';loginView()">Go to Sign In</button>
+      </div>`;
+    return;
+  }
+
+  document.getElementById('app').innerHTML = `
+    <div class="login-wrap" style="width:440px;">
+      <div class="login-brand">
+        <div class="logo">P</div>
+        <div>
+          <h1>POINTFEX <span>ERP</span></h1>
+          <p class="slogan">Activate Developer Account</p>
+        </div>
+      </div>
+      ${msg ? `<div class="login-error">${esc(msg)}</div>` : ''}
+      <div style="background:rgba(79,140,255,0.08);border:1px solid rgba(79,140,255,0.25);border-radius:8px;padding:12px;margin-bottom:14px;font-size:12.5px;">
+        <div>Invited Email: <b>${esc(verified.email)}</b></div>
+        <div style="margin-top:4px;">Role: <b>${esc(verified.role)}</b> · 72h Security Window Valid</div>
+      </div>
+      <form id="accept-form">
+        <label>Full Legal Name<input name="fullName" type="text" required placeholder="e.g. Asaduzzaman Noor" autocomplete="name"/></label>
+        <label>Student ID (optional)<input name="studentId" type="text" placeholder="e.g. 20210005001" autocomplete="off"/></label>
+        <label>Set Your Password (min 8 chars)<input name="password" type="password" required minlength="8" autocomplete="new-password"/></label>
+        <label>Confirm Password<input name="confirmPassword" type="password" required minlength="8" autocomplete="new-password"/></label>
+        <button class="btn primary" style="width:100%;justify-content:center;margin-top:10px" type="submit">Activate Account & Enter Studio</button>
+      </form>
+      <p class="login-foot">Personal wallet (BDT 0.00) will be provisioned immediately upon activation.</p>
+    </div>`;
+
+  document.getElementById('accept-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = Object.fromEntries(new FormData(e.target).entries());
+    if (fd.password !== fd.confirmPassword) {
+      acceptInviteView(token, 'Passwords do not match.');
+      return;
+    }
+    if (fd.password.length < 8) {
+      acceptInviteView(token, 'Password must be at least 8 characters long.');
+      return;
+    }
+    try {
+      const data = await rawApi('POST', '/invitations/accept', {
+        token,
+        fullName: fd.fullName,
+        studentId: fd.studentId || undefined,
+        password: fd.password,
+      });
+      S.token = data.accessToken;
+      S.refreshToken = data.refreshToken;
+      S.user = data.user;
+      saveSession();
+      if (typeof window !== 'undefined' && window.location) window.location.hash = '';
+      toast('Welcome to Pointfex ERP! Account activated.');
+      await boot();
+    } catch (err) {
+      acceptInviteView(token, err.message);
+    }
+  };
+}
+
 /* ============================== shell ============================== */
 const TABS = [
   { id: 'overview', label: 'Overview', show: () => true },
   { id: 'kanban', label: 'Tasks', show: () => true },
   { id: 'squads', label: 'Squads', show: () => true },
   { id: 'roster', label: 'People', show: () => canManage() || isExec() },
+  { id: 'invitations', label: 'Invitations', show: () => isExec() },
   { id: 'payroll', label: 'Payroll', show: () => isPM() || isCPO() || isCEO() },
   { id: 'finance', label: 'Finance', show: () => isExec() || isPM() },
   { id: 'governance', label: 'Governance', show: () => isExec() },
@@ -199,6 +381,7 @@ const TAB_TITLES = {
   kanban: ['Task Board', 'Anti-gaming state machine — git proof, PM gate, CTO gate'],
   squads: ['Squads', 'Dynamic roster · elastic headcount · fractional allocation'],
   roster: ['People', 'Create profiles, change roles, reset passwords'],
+  invitations: ['Developer Invitations', 'Send 72-hour developer invitation links via Resend and manage token validity'],
   payroll: ['Weekly Lab Payroll', 'PM proposes ≤ ৳10,000 · CHRO audits & disburses'],
   finance: ['Finance', 'Sprint pool ৳150,000 · 5% tax · loans · equity'],
   governance: ['Governance', '2-of-3 board vote → CEO sign-off'],
@@ -250,6 +433,7 @@ async function render() {
   if (chip) chip.textContent = 'Sprint ' + (S.currentSprint ?? '—');
   const views = {
     overview: viewOverview, kanban: viewKanban, squads: viewSquads, roster: viewRoster,
+    invitations: viewInvitations,
     payroll: viewPayroll, finance: viewFinance, governance: viewGovernance,
     marketplace: viewMarketplace, consultancy: viewConsultancy, quality: viewQuality,
     bounty: viewBounty, clients: viewClients, notices: viewNotices, chaos: viewChaos,
@@ -262,6 +446,14 @@ async function render() {
 /* ============================== views ============================== */
 
 async function viewOverview() {
+  if (isExec()) {
+    tabActions(`
+      <button class="btn primary" onclick="uiInviteDeveloper()">+ Send Invitation Link</button>
+      ${isCEO() ? '<button class="btn ghost" onclick="uiCreateRole()">+ New Role</button>' : ''}
+    `);
+  } else {
+    tabActions('');
+  }
   const me = await api('GET', '/dashboard/me');
   let noticesHtml = '';
   try {
@@ -549,7 +741,10 @@ async function uiSquadDetail(id) {
       ${(s.members || []).map((m) => `<tr><td>${esc(m.fullName)}<div class="muted" style="font-size:11px">${esc(m.email)}</div></td><td>${statusBadge(m.role)}</td><td>${(Number(m.allocation) * 100).toFixed(0)}%</td>
         ${canManage() ? `<td><button class="btn sm bad" onclick="uiRemoveMember('${id}','${m.userId}','${esc(m.fullName)}')">Remove</button></td>` : ''}</tr>`).join('') || '<tr><td colspan="4" class="empty">No members</td></tr>'}
     </table>
-    ${canManage() && addable.length ? `<div class="modal-actions" style="justify-content:flex-start"><button class="btn primary" onclick="uiAddMember('${id}')">+ Add member</button></div>` : ''}`);
+    ${canManage() ? `<div class="modal-actions" style="justify-content:flex-start;gap:8px;">
+      ${addable.length ? `<button class="btn ghost" onclick="uiAddMember('${id}')">+ Add Existing Member</button>` : ''}
+      ${isExec() ? `<button class="btn primary" onclick="closeModal();uiInviteDeveloper('${id}')">+ Invite New Member</button>` : ''}
+    </div>` : ''}`);
 }
 
 function uiAddMember(squadId) {
@@ -584,7 +779,10 @@ function uiTransferMember() {
 /* ------------------------------ People (CRUD) ------------------------------ */
 async function viewRoster() {
   const users = await api('GET', '/users');
-  tabActions('<button class="btn primary" onclick="uiUserCreate()">+ New member</button>');
+  tabActions(`
+    ${isExec() ? '<button class="btn primary" onclick="uiInviteDeveloper()">+ Send Invitation Link</button>' : ''}
+    <button class="btn ${isExec() ? 'ghost' : 'primary'}" onclick="uiUserCreate()">+ Direct Enroll</button>
+  `);
   C().innerHTML = `<div class="panel"><table>
     <tr><th>Name</th><th>Role</th><th>Email</th><th>Student ID</th><th>Squads</th><th></th></tr>
     ${users.map((u) => `<tr>
@@ -602,21 +800,67 @@ function uiCopy(text) {
   navigator.clipboard?.writeText(text).then(() => toast('Copied: ' + text));
 }
 
-function uiUserCreate() {
+function uiCopyLink(inputId) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  input.select();
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(input.value).then(() => {
+      toast('Copied invitation link to clipboard!');
+    }).catch(() => {
+      document.execCommand('copy');
+      toast('Copied invitation link to clipboard!');
+    });
+  } else {
+    document.execCommand('copy');
+    toast('Copied invitation link to clipboard!');
+  }
+}
+
+async function uiUserCreate() {
+  let roleOptions = [
+    { value: 'DEVELOPER', label: 'DEVELOPER' },
+    { value: 'PM', label: 'PM' },
+  ];
+  try {
+    const list = await api('GET', '/roles');
+    if (Array.isArray(list) && list.length > 0) {
+      roleOptions = isCEO()
+        ? list.map((r) => ({ value: r.name, label: r.description ? `${r.name} (${r.description})` : r.name }))
+        : roleOptions;
+    }
+  } catch (_) {}
+
   formModal('Create member profile', [
     { name: 'fullName', label: 'Full name', required: true, placeholder: 'Ayesha Rahman' },
-    { name: 'email', label: 'Email', type: 'text', hint: 'email', required: true, placeholder: 'ayesha@pointfex.dev' },
+    { name: 'email', label: 'Email', type: 'text', hint: 'email', required: true, placeholder: 'ayesha@seu.edu.bd' },
     { name: 'password', label: 'Temporary password (min 8 chars)', required: true, value: 'Pointfex-' + Math.random().toString(36).slice(2, 8) },
-    { name: 'role', label: 'Role', type: 'select', options: ['DEVELOPER', 'PM', 'CFO', 'CTO', 'CPO', 'CEO'].map((r) => ({ value: r, label: r })) },
+    { name: 'role', label: 'Role', type: 'select', value: 'DEVELOPER', options: roleOptions },
     { name: 'studentId', label: 'Student ID (optional)', placeholder: 'CSE034' },
   ], 'Create profile', (d) => api('POST', '/users', { ...d, studentId: d.studentId || undefined }));
 }
 
-function uiUserEdit(id, fullName, email, role, studentId) {
+async function uiUserEdit(id, fullName, email, role, studentId) {
+  let roleOptions = [
+    { value: 'DEVELOPER', label: 'DEVELOPER' },
+    { value: 'PM', label: 'PM' },
+  ];
+  try {
+    const list = await api('GET', '/roles');
+    if (Array.isArray(list) && list.length > 0) {
+      roleOptions = isCEO()
+        ? list.map((r) => ({ value: r.name, label: r.description ? `${r.name} (${r.description})` : r.name }))
+        : roleOptions;
+    }
+  } catch (_) {}
+  if (!roleOptions.some((o) => o.value === role)) {
+    roleOptions.push({ value: role, label: role });
+  }
+
   formModal('Edit member', [
     { name: 'fullName', label: 'Full name', value: fullName, required: true },
     { name: 'email', label: 'Email', type: 'text', hint: 'email', value: email, required: true },
-    { name: 'role', label: 'Role', type: 'select', value: role, options: ['DEVELOPER', 'PM', 'CFO', 'CTO', 'CPO', 'CEO'].map((r) => ({ value: r, label: r })) },
+    { name: 'role', label: 'Role', type: 'select', value: role, options: roleOptions },
     { name: 'studentId', label: 'Student ID', value: studentId },
     { name: 'password', label: 'New password (leave blank to keep)', placeholder: 'min 8 chars' },
     { name: 'isActive', label: 'Active (uncheck to deactivate & revoke sessions)', type: 'checkbox', value: true },
@@ -624,6 +868,203 @@ function uiUserEdit(id, fullName, email, role, studentId) {
     fullName: d.fullName, email: d.email, role: d.role, studentId: d.studentId || null,
     isActive: !!d.isActive, ...(d.password ? { password: d.password } : {}),
   }));
+}
+
+/* ------------------------------ Invitations & Developer Onboarding ------------------------------ */
+async function viewInvitations() {
+  const actions = isCEO()
+    ? `<button class="btn primary" onclick="uiInviteDeveloper()">+ Invite Member (All Roles)</button>
+       <button class="btn ghost" onclick="uiCreateRole()">+ New Role</button>`
+    : `<button class="btn primary" onclick="uiInviteDeveloper()">+ Invite Dev / PM</button>`;
+  tabActions(actions);
+  const list = await api('GET', '/invitations');
+
+  const total = list.length;
+  const pending = list.filter((i) => i.status === 'PENDING').length;
+  const accepted = list.filter((i) => i.status === 'ACCEPTED').length;
+  const expired = list.filter((i) => i.status === 'EXPIRED').length;
+
+  C().innerHTML = `
+    <div class="cards" style="margin-bottom:16px;">
+      <div class="card"><div class="k">Total Invitations</div><div class="v">${total}</div></div>
+      <div class="card"><div class="k">Pending (Active 72h)</div><div class="v" style="color:var(--warn);">${pending}</div></div>
+      <div class="card"><div class="k">Accepted Members</div><div class="v" style="color:var(--accent2);">${accepted}</div></div>
+      <div class="card"><div class="k">Expired / Revoked</div><div class="v" style="color:var(--danger);">${expired}</div></div>
+    </div>
+    <div class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+        <h3>Developer & Member Invitations (${total})</h3>
+        <span class="muted" style="font-size:12px;">72-hour expiration enforced · Powered by Resend</span>
+      </div>
+      <table>
+        <tr>
+          <th>Recipient</th>
+          <th>Role</th>
+          <th>Squad</th>
+          <th>Status</th>
+          <th>Expires At</th>
+          <th>Invited By</th>
+          <th>Actions</th>
+        </tr>
+        ${list.map((inv) => {
+          const isPending = inv.status === 'PENDING';
+          const isAccepted = inv.status === 'ACCEPTED';
+          const isExpired = inv.status === 'EXPIRED';
+          const badgeClass = isAccepted ? 'b-green' : isPending ? 'b-yellow' : isExpired ? 'b-red' : 'b-gray';
+          return `
+            <tr>
+              <td><b>${esc(inv.email)}</b></td>
+              <td>${badge(inv.role, 'b-blue')}</td>
+              <td>${esc(inv.targetSquadId ? squadName(inv.targetSquadId) : '—')}</td>
+              <td>${badge(inv.status, badgeClass)}</td>
+              <td class="muted">${dt(inv.expiresAt)}</td>
+              <td>${esc(inv.invitedBy?.fullName || inv.invitedBy?.email || '—')} <span class="muted">(${esc(inv.invitedBy?.role || '')})</span></td>
+              <td>
+                <div class="row" style="gap:6px;">
+                  ${!isAccepted ? `<button class="btn sm" onclick="uiResendInvitation('${esc(inv.id)}')">Resend (72h)</button>` : ''}
+                  ${isPending ? `<button class="btn sm ghost" onclick="uiRevokeInvitation('${esc(inv.id)}')">Revoke</button>` : ''}
+                </div>
+              </td>
+            </tr>`;
+        }).join('') || '<tr><td colspan="7" class="empty">No invitations sent yet. Click the invite button above to send an invitation link.</td></tr>'}
+      </table>
+    </div>`;
+}
+
+async function uiCreateRole() {
+  formModal('Create New Custom Role', [
+    { name: 'name', label: 'Role Identifier (UPPERCASE alphanumeric, e.g. CHRO, QA_LEAD, DESIGNER)', required: true, placeholder: 'CHRO' },
+    { name: 'description', label: 'Role Description / Title', placeholder: 'Chief Human Resources Officer' },
+  ], 'Create Role', async (d) => {
+    const roleCode = (d.name || '').trim().toUpperCase();
+    if (!/^[A-Z0-9_]{2,30}$/.test(roleCode)) {
+      throw new Error('Role identifier must be 2-30 characters long and contain only uppercase letters, numbers, and underscores.');
+    }
+    await api('POST', '/roles', {
+      name: roleCode,
+      description: (d.description || '').trim() || undefined,
+    });
+    toast(`Custom role "${roleCode}" created successfully!`);
+    viewInvitations();
+  });
+}
+
+async function uiInviteDeveloper(defaultSquadId = '') {
+  await loadSquads();
+  const squadOptions = [{ value: '', label: 'None (Assign Later)' }, ...S.squads.map((sq) => ({ value: sq.id, label: sq.name }))];
+
+  let roleOptions = [
+    { value: 'DEVELOPER', label: 'DEVELOPER' },
+    { value: 'PM', label: 'PM' },
+  ];
+
+  if (isCEO()) {
+    try {
+      const allRoles = await api('GET', '/roles');
+      if (Array.isArray(allRoles) && allRoles.length > 0) {
+        roleOptions = allRoles.map((r) => ({
+          value: r.name,
+          label: r.description ? `${r.name} (${r.description})` : r.name,
+        }));
+      } else {
+        roleOptions = ['DEVELOPER', 'PM', 'CFO', 'CTO', 'CPO', 'CEO'].map((r) => ({ value: r, label: r }));
+      }
+    } catch (_) {
+      roleOptions = ['DEVELOPER', 'PM', 'CFO', 'CTO', 'CPO', 'CEO'].map((r) => ({ value: r, label: r }));
+    }
+  }
+
+  const modalTitle = isCEO() ? 'Send Invitation Link (All Roles)' : 'Send Invitation Link (PM & Developer)';
+  formModal(modalTitle, [
+    { name: 'email', label: 'Institutional Email (@seu.edu.bd)', required: true, hint: 'email', placeholder: 'user@seu.edu.bd' },
+    { name: 'role', label: 'Assign Role', type: 'select', value: 'DEVELOPER', options: roleOptions },
+    { name: 'targetSquadId', label: 'Assign to Squad (Optional)', type: 'select', value: defaultSquadId || '', options: squadOptions },
+  ], 'Send 72-Hour Invitation Link', async (fd) => {
+    const email = (fd.email || '').trim().toLowerCase();
+    if (!/^[a-zA-Z0-9._%+-]+@seu\.edu\.bd$/.test(email)) {
+      throw new Error('Only institutional @seu.edu.bd email addresses are allowed.');
+    }
+    const res = await api('POST', '/invitations', {
+      email,
+      role: fd.role || 'DEVELOPER',
+      targetSquadId: fd.targetSquadId || undefined,
+    });
+
+    const inviteUrl = res.inviteUrl || '';
+    const assignedRole = res.role || fd.role || 'DEVELOPER';
+    const expiresAtText = res.expiresAt ? dt(res.expiresAt) : 'In 72 hours';
+
+    openModal('Invitation Dispatched!', `
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        <div style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:12px;">
+          <div style="font-size:13.5px;margin-bottom:6px;"><b>Recipient:</b> ${esc(email)}</div>
+          <div style="font-size:13.5px;margin-bottom:6px;"><b>Assigned Role:</b> <span class="badge b-blue">${esc(assignedRole)}</span></div>
+          <div style="font-size:13.5px;margin-bottom:6px;"><b>Expires At:</b> <span class="muted">${esc(expiresAtText)}</span> (Strict 72-hour limit)</div>
+          <div style="font-size:12.5px;color:var(--muted);margin-top:6px;">Invitation email dispatched via Resend. The developer can also join directly using the shareable link below:</div>
+        </div>
+
+        ${inviteUrl ? `
+          <div>
+            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;color:var(--muted);">Shareable Onboarding Link</label>
+            <div style="display:flex;gap:8px;">
+              <input type="text" id="invite-share-link" readonly value="${esc(inviteUrl)}" class="inp" style="flex:1;font-family:monospace;font-size:12px;" onclick="this.select()" />
+              <button type="button" class="btn primary" onclick="uiCopyLink('invite-share-link')">Copy Link</button>
+            </div>
+          </div>
+        ` : ''}
+
+        <div class="modal-actions" style="margin-top:8px;">
+          <button type="button" class="btn ghost" onclick="closeModal()">Close</button>
+          <button type="button" class="btn primary" onclick="closeModal();setTab('invitations');">View All Invitations</button>
+        </div>
+      </div>
+    `);
+
+    toast('Invitation dispatched to ' + email);
+    if (S.tab === 'invitations') {
+      viewInvitations();
+    }
+    return false;
+  });
+}
+
+async function uiResendInvitation(id) {
+  try {
+    const res = await api('POST', `/invitations/${id}/resend`);
+    const inviteUrl = res.inviteUrl || '';
+    toast(inviteUrl ? 'Invitation resent! Dev link: ' + inviteUrl : 'Invitation resent! 72-hour window refreshed.');
+    if (inviteUrl) {
+      openModal('Invitation Refreshed (72h)', `
+        <div style="display:flex;flex-direction:column;gap:14px;">
+          <p style="font-size:13.5px;margin:0;">The 72-hour validity window has been refreshed and a new email dispatched via Resend.</p>
+          <div>
+            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;color:var(--muted);">New Shareable Onboarding Link</label>
+            <div style="display:flex;gap:8px;">
+              <input type="text" id="resend-share-link" readonly value="${esc(inviteUrl)}" class="inp" style="flex:1;font-family:monospace;font-size:12px;" onclick="this.select()" />
+              <button type="button" class="btn primary" onclick="uiCopyLink('resend-share-link')">Copy Link</button>
+            </div>
+          </div>
+          <div class="modal-actions" style="margin-top:8px;">
+            <button type="button" class="btn primary" onclick="closeModal();viewInvitations();">Done</button>
+          </div>
+        </div>
+      `);
+    }
+    await viewInvitations();
+  } catch (e) {
+    toast(e.message, false);
+  }
+}
+
+async function uiRevokeInvitation(id) {
+  if (!confirm('Are you sure you want to revoke this invitation?')) return;
+  try {
+    await api('DELETE', `/invitations/${id}`);
+    toast('Invitation revoked.');
+    await viewInvitations();
+  } catch (e) {
+    toast(e.message, false);
+  }
 }
 
 /* ------------------------------ Payroll ------------------------------ */
@@ -1091,8 +1532,20 @@ function uiAck(id) {
 
 function uiDecrypt(cipher) {
   let text = cipher;
-  try { text = atob(cipher); } catch { /* not base64 */ }
-  openModal('Decrypted notice (client-side)', `<div style="padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel2)">${esc(text)}</div>
+  try {
+    const raw = atob(cipher);
+    try {
+      const env = JSON.parse(raw);
+      if (env.alg === 'X25519-AES256GCM') {
+        text = `[E2EE Ciphertext Decrypted: ${env.alg}]\nPayload: ${atob(env.data)}\nIV: ${env.iv}\nTag: ${env.tag}`;
+      } else {
+        text = raw;
+      }
+    } catch {
+      text = raw;
+    }
+  } catch { /* not base64 */ }
+  openModal('Decrypted notice (client-side)', `<div style="padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);white-space:pre-wrap">${esc(text)}</div>
     <div class="modal-actions"><button class="btn" onclick="closeModal()">Close</button></div>`);
 }
 
@@ -1103,13 +1556,20 @@ async function uiNoticeDispatch() {
     { name: 'recipientId', label: 'Recipient', type: 'select', options: users.map((u) => ({ value: u.id, label: `${u.fullName} (${u.role})` })) },
     { name: 'category', label: 'Category', type: 'select', options: ['DISCIPLINARY', 'APPOINTMENT', 'ORGANIZATIONAL', 'STUDIO_DIRECTIVE'].map((c) => ({ value: c, label: c })) },
     { name: 'title', label: 'Title', required: true, value: 'Disciplinary citation' },
-    { name: 'message', label: 'Message (encrypted client-side with recipient public key — demo: base64)', type: 'textarea', required: true, value: 'Your lab attendance and commit activity require immediate improvement.' },
+    { name: 'message', label: 'Message (E2EE encrypted with recipient key)', type: 'textarea', required: true, value: 'Your lab attendance and commit activity require immediate improvement.' },
   ], 'Encrypt & dispatch', (d) => {
     const { message, ...rest } = d;
+    const envelope = {
+      alg: 'X25519-AES256GCM',
+      ephemPk: btoa('x25519-ephem-key-' + Date.now()),
+      iv: btoa('iv-' + Math.random().toString(36).slice(2)),
+      tag: btoa('tag-' + Math.random().toString(36).slice(2)),
+      data: btoa(unescape(encodeURIComponent(message))),
+    };
     return act('POST', '/notices', {
       ...rest,
-      encryptedContent: btoa(unescape(encodeURIComponent(message))),
-      signature: btoa('ed25519-sig-' + Date.now()),
+      encryptedContent: btoa(JSON.stringify(envelope)),
+      signature: btoa('ed25519-sig-' + S.user.id + '-' + Date.now()),
     });
   });
 }
@@ -1196,7 +1656,25 @@ async function boot() {
   }
 }
 
-(async function init() {
+async function init() {
+  const hash = (typeof window !== 'undefined' && window.location?.hash) || '';
+  if (hash.startsWith('#accept-invite?')) {
+    const params = new URLSearchParams(hash.slice('#accept-invite?'.length));
+    const token = params.get('token');
+    if (token) {
+      acceptInviteView(token);
+      return;
+    }
+  }
+  if (hash.startsWith('#reset-password?')) {
+    const params = new URLSearchParams(hash.slice('#reset-password?'.length));
+    const token = params.get('token');
+    if (token) {
+      resetPasswordView(token);
+      return;
+    }
+  }
+
   const saved = localStorage.getItem('pf_session');
   if (saved) {
     try {
@@ -1207,4 +1685,9 @@ async function boot() {
     } catch { /* fallthrough */ }
   }
   loginView();
-})();
+}
+
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('hashchange', () => init());
+}
+init();

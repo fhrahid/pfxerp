@@ -1,5 +1,6 @@
 import { Body, Controller, ForbiddenException, Get, Param, Patch, Post } from '@nestjs/common';
 import { IsBoolean, IsEmail, IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { UserRole } from '@prisma/client';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Roles, CurrentUser } from '../../common/decorators';
@@ -9,6 +10,7 @@ import { UsersService } from './users.service';
 
 class CreateUserDto {
   @IsEmail()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
   email: string;
 
   @IsString()
@@ -19,8 +21,8 @@ class CreateUserDto {
   @MinLength(8)
   password: string;
 
-  @IsEnum(UserRole)
-  role: UserRole;
+  @IsString()
+  role: string;
 
   @IsOptional()
   @IsString()
@@ -35,11 +37,12 @@ class UpdateUserDto {
 
   @IsOptional()
   @IsEmail()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
   email?: string;
 
   @IsOptional()
-  @IsEnum(UserRole)
-  role?: UserRole;
+  @IsString()
+  role?: string;
 
   @IsOptional()
   @IsString()
@@ -89,8 +92,8 @@ export class UsersController {
   /** CPO/CEO: create a member profile (wallet auto-provisioned). */
   @Post()
   @Roles(UserRole.CPO, UserRole.CEO)
-  create(@Body() dto: CreateUserDto) {
-    return this.usersService.createUser(dto);
+  create(@Body() dto: CreateUserDto, @CurrentUser() caller: AuthUser) {
+    return this.usersService.createUser(dto, caller);
   }
 
   /** Developers/PMs may only fetch themselves; executives may fetch anyone. */
@@ -117,7 +120,7 @@ export class UsersController {
   /** CPO/CEO: update a profile (rename, role change, password reset, deactivate). */
   @Patch(':id')
   @Roles(UserRole.CPO, UserRole.CEO)
-  update(@Param('id') id: string, @Body() dto: UpdateUserDto) {
-    return this.usersService.updateUser(id, dto);
+  update(@Param('id') id: string, @Body() dto: UpdateUserDto, @CurrentUser() caller: AuthUser) {
+    return this.usersService.updateUser(id, dto, caller);
   }
 }

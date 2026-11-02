@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { SettingsService } from '../settings/settings.service';
 import { CertificationsService } from '../certifications/certifications.service';
+import { DashboardService } from '../dashboard/dashboard.service';
 import { AuthUser } from '../../common/types';
 import { AppException } from '../../common/exceptions/app.exception';
 
@@ -19,6 +20,7 @@ export class ConsultancyService {
     private readonly ledger: LedgerService,
     private readonly settings: SettingsService,
     private readonly certs: CertificationsService,
+    private readonly dashboard: DashboardService,
   ) {}
 
   async book(user: AuthUser, dto: { consultantId: string; clientSquadId: string; scheduledAt: string }, idempotencyKey: string) {
@@ -30,6 +32,16 @@ export class ConsultancyService {
         where: { userId: user.id, squadId: dto.clientSquadId, role: 'PM', leftAt: null },
       });
       if (!m) throw new ForbiddenException('Only the client squad PM may book consultancy');
+    }
+
+    const clientSquad = await this.prisma.squad.findUnique({ where: { id: dto.clientSquadId } });
+    if (!clientSquad) throw new NotFoundException('Client squad not found');
+    if (clientSquad.healthStatus === 'BANKRUPT_RISK') {
+      throw new ForbiddenException('BANKRUPT_RISK: Squad treasury is frozen for non-essential consultancy bookings (BR-CFO-11)');
+    }
+    const tech = await this.dashboard.computeSquadTechScore(dto.clientSquadId, clientSquad.name);
+    if (tech.tier === 'Tier F') {
+      throw new ForbiddenException('Tier F Tech Score: consultancy bookings are frozen for this squad (cto.md §1.2)');
     }
 
     const scheduledAt = new Date(dto.scheduledAt);
@@ -170,7 +182,7 @@ export class ConsultancyService {
     });
   }
 
-  private async roleOf(userId: string): Promise<UserRole> {
+  private async roleOf(userId: string): Promise<string> {
     const u = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!u) throw new NotFoundException('Consultant not found');
     return u.role;

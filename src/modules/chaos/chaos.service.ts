@@ -102,7 +102,7 @@ export class ChaosService implements OnModuleInit, OnModuleDestroy {
     await this.prisma.executiveAuditLog.create({
       data: {
         executiveId: user.id,
-        executiveRole: user.role,
+        executiveRole: (user.role as UserRole) || UserRole.CEO,
         actionType: 'CHAOS_EVENT_TRIGGERED',
         payloadSnapshot: { eventId: event.id, type: event.type, targetSquadId: dto.targetSquadId } as any,
         riskSeverity: 'WARNING',

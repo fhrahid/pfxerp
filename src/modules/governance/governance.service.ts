@@ -121,7 +121,7 @@ export class GovernanceService {
     await this.prisma.executiveAuditLog.create({
       data: {
         executiveId: user.id,
-        executiveRole: user.role,
+        executiveRole: (user.role as UserRole) || UserRole.CEO,
         actionType: dto.approve ? 'GOVERNANCE_CEO_APPROVED' : 'GOVERNANCE_CEO_VETOED',
         payloadSnapshot: { decisionId, category: decision.category, comment: dto.comment } as any,
         riskSeverity: 'INFO',

@@ -339,8 +339,11 @@ function GitModal({ squadId, name, onClose }: { squadId: string; name: string; o
             </div>
           </>
         ) : (
-          <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-            No repositories connected yet.
+          <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground flex flex-col items-center justify-center gap-3">
+            <p>No repositories connected yet.</p>
+            {canManage ? (
+              <AddRepoButton squadId={squadId} onAdded={() => repos.refetch()} />
+            ) : null}
           </div>
         )}
         {canManage ? (

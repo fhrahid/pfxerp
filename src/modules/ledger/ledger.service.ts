@@ -52,7 +52,7 @@ export class LedgerService {
   // --------------------------------------------------------------
   // Core posting engine
   // --------------------------------------------------------------
-  async postTransaction(params: PostTransactionParams): Promise<LedgerTransaction> {
+  async postTransaction(params: PostTransactionParams, transactionClient?: Prisma.TransactionClient): Promise<LedgerTransaction> {
     const { entries } = params;
 
     if (!entries.length) throw new BadRequestException('Transaction requires at least one entry');
@@ -73,17 +73,19 @@ export class LedgerService {
       );
     }
 
-    return this.prisma.$transaction(
-      async (tx) => {
+    const post = async (tx: Prisma.TransactionClient) => {
+        const accountIds = [...new Set(entries.map((e) => e.accountId))].sort();
         // 1. Idempotency replay (main.md §7.3)
         const existing = await tx.ledgerTransaction.findUnique({
           where: { idempotencyKey: params.idempotencyKey },
           include: { entries: true },
         });
-        if (existing) return existing;
+        if (existing) {
+          const originalAccountIds = [...new Set(existing.entries.map((entry) => entry.accountId))].sort();
+          return { transaction: existing, accountIds: originalAccountIds };
+        }
 
         // 2. Deterministic account locking, ascending id (security.md §5.1)
-        const accountIds = [...new Set(entries.map((e) => e.accountId))].sort();
         const locked: Account[] = await tx.$queryRaw<Account[]>(Prisma.sql`
           SELECT id, balance, "isFrozen" FROM "Account"
           WHERE id::text IN (${Prisma.join(accountIds)})
@@ -161,22 +163,27 @@ export class LedgerService {
           include: { entries: true },
         });
 
-        // 6. Real-time balance broadcasts (other.md §6)
-        for (const accountId of accountIds) {
-          const acc = await tx.account.findUnique({ where: { id: accountId } });
-          if (acc) {
-            this.events.emitToRoom(`account:${accountId}`, 'balance:updated', {
-              accountId,
-              newBalance: Number(acc.balance),
-              currency: acc.currency,
-            });
-          }
-        }
+        return { transaction, accountIds };
+    };
 
-        return transaction;
-      },
-      { timeout: 15000 },
-    );
+    // A caller that owns a wider transaction also owns publishing its events.
+    if (transactionClient) return (await post(transactionClient)).transaction;
+
+    const result = await this.prisma.$transaction(post, { timeout: 15000 });
+    await this.publishBalanceUpdates(result.accountIds);
+    return result.transaction;
+  }
+
+  /** Publish account changes only after the transaction that wrote them committed. */
+  async publishBalanceUpdates(accountIds: string[]) {
+    const accounts = await this.prisma.account.findMany({ where: { id: { in: [...new Set(accountIds)] } } });
+    for (const acc of accounts) {
+      this.events.emitToRoom(`account:${acc.id}`, 'balance:updated', {
+        accountId: acc.id,
+        newBalance: Number(acc.balance),
+        currency: acc.currency,
+      });
+    }
   }
 
   /** Simple two-sided transfer helper. */
@@ -209,28 +216,28 @@ export class LedgerService {
   // --------------------------------------------------------------
   // Account resolution helpers
   // --------------------------------------------------------------
-  private async byType(type: AccountType): Promise<Account> {
-    const acc = await this.prisma.account.findFirst({ where: { type } });
+  private async byType(type: AccountType, client: Pick<Prisma.TransactionClient, 'account'> = this.prisma): Promise<Account> {
+    const acc = await client.account.findFirst({ where: { type } });
     if (!acc) throw new BadRequestException(`${type} account is not provisioned`);
     return acc;
   }
 
-  systemReserve() {
-    return this.byType(AccountType.SYSTEM_RESERVE);
+  systemReserve(client?: Pick<Prisma.TransactionClient, 'account'>) {
+    return this.byType(AccountType.SYSTEM_RESERVE, client);
   }
 
   escrow() {
     return this.byType(AccountType.ESCROW);
   }
 
-  async personalWallet(userId: string): Promise<Account> {
-    const acc = await this.prisma.account.findUnique({ where: { ownerId: userId } });
+  async personalWallet(userId: string, client: Pick<Prisma.TransactionClient, 'account'> = this.prisma): Promise<Account> {
+    const acc = await client.account.findUnique({ where: { ownerId: userId } });
     if (!acc) throw new BadRequestException(`Personal wallet for user ${userId} is not provisioned`);
     return acc;
   }
 
-  async squadTreasury(squadId: string): Promise<Account> {
-    const acc = await this.prisma.account.findUnique({ where: { squadId } });
+  async squadTreasury(squadId: string, client: Pick<Prisma.TransactionClient, 'account'> = this.prisma): Promise<Account> {
+    const acc = await client.account.findUnique({ where: { squadId } });
     if (!acc) throw new BadRequestException(`Squad treasury for squad ${squadId} is not provisioned`);
     return acc;
   }
@@ -280,4 +287,5 @@ export class LedgerService {
     });
     return txs;
   }
+
 }

@@ -16,11 +16,17 @@ import '../src/env';
 import { PrismaClient, AccountType, UserRole, SquadRole, CertificationType } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { randomBytes } from 'crypto';
+import { E2EEUtil } from '../src/common/crypto/e2ee.util';
 
 const prisma = new PrismaClient();
 
-async function upsertUser(data: { email: string; fullName: string; role: UserRole; studentId?: string; password: string }) {
+async function upsertUser(data: { email: string; fullName: string; role: UserRole | string; studentId?: string; password: string }) {
   const passwordHash = await bcrypt.hash(data.password, 12);
+  const keys = E2EEUtil.generateUserKeys();
+  const publicKey = JSON.stringify({
+    ed25519: keys.signing.publicKey,
+    x25519: keys.exchange.publicKey,
+  });
   const user = await prisma.user.upsert({
     where: { email: data.email },
     update: {},
@@ -30,6 +36,7 @@ async function upsertUser(data: { email: string; fullName: string; role: UserRol
       fullName: data.fullName,
       role: data.role,
       studentId: data.studentId ?? null,
+      publicKey,
       isActive: true,
     },
   });
@@ -44,6 +51,23 @@ async function upsertUser(data: { email: string; fullName: string; role: UserRol
 /** Production-safe genesis: no demo users, no squads — just the economic substrate + CEO. */
 export async function runBootstrapSeed() {
   console.log('--- Pointfex bootstrap seeding (production-safe) ---');
+
+  // 0. Seed System Roles
+  const defaultRoles = [
+    { name: 'CEO', description: 'Chief Executive Officer' },
+    { name: 'CFO', description: 'Chief Financial Officer' },
+    { name: 'CTO', description: 'Chief Technology Officer' },
+    { name: 'CPO', description: 'Chief Product Officer' },
+    { name: 'PM', description: 'Project Manager' },
+    { name: 'DEVELOPER', description: 'Software Developer' },
+  ];
+  for (const r of defaultRoles) {
+    await prisma.role.upsert({
+      where: { name: r.name },
+      update: { isSystem: true },
+      create: { name: r.name, description: r.description, isSystem: true },
+    });
+  }
 
   // 1. CEO (Course Faculty) — credentials from env; random password printed if not provided
   const ceoEmail = process.env.INITIAL_CEO_EMAIL || 'noor@seu.edu.bd';
@@ -116,9 +140,9 @@ export async function runDemoSeed() {
   const MEMBER_PASSWORD = process.env.SEED_DEMO_PASSWORD || 'Pointfex2026!';
 
   // Executive board (Team 0)
-  const cfo = await upsertUser({ email: 'cfo@pointfex.dev', fullName: 'Farhan Rahman (CFO)', role: UserRole.CFO, studentId: 'CSE001', password: MEMBER_PASSWORD });
-  const cto = await upsertUser({ email: 'cto@pointfex.dev', fullName: 'Nafisa Ahmed (CTO)', role: UserRole.CTO, studentId: 'CSE002', password: MEMBER_PASSWORD });
-  await upsertUser({ email: 'cpo@pointfex.dev', fullName: 'Rafiul Karim (CPO)', role: UserRole.CPO, studentId: 'CSE003', password: MEMBER_PASSWORD });
+  const cfo = await upsertUser({ email: 'cfo@seu.edu.bd', fullName: 'Farhan Rahman (CFO)', role: UserRole.CFO, studentId: 'CSE001', password: MEMBER_PASSWORD });
+  const cto = await upsertUser({ email: 'cto@seu.edu.bd', fullName: 'Nafisa Ahmed (CTO)', role: UserRole.CTO, studentId: 'CSE002', password: MEMBER_PASSWORD });
+  await upsertUser({ email: 'cpo@seu.edu.bd', fullName: 'Rafiul Karim (CPO)', role: UserRole.CPO, studentId: 'CSE003', password: MEMBER_PASSWORD });
 
   // CTO auto-certifications (BR-CTO-34, BR-CTO-40: lifetime preapproval)
   for (const t of [CertificationType.CONSULTANT, CertificationType.MARKETPLACE_AUTHOR, CertificationType.SECURITY_RESEARCHER]) {
@@ -153,7 +177,7 @@ export async function runDemoSeed() {
     });
 
     const pm = await upsertUser({
-      email: `pm${i}@pointfex.dev`, fullName: `PM Squad ${i}`, role: UserRole.PM,
+      email: `pm${i}@seu.edu.bd`, fullName: `PM Squad ${i}`, role: UserRole.PM,
       studentId: `CSE${String(studentSeq++).padStart(3, '0')}`, password: MEMBER_PASSWORD,
     });
     await prisma.squadMembership.upsert({
@@ -164,7 +188,7 @@ export async function runDemoSeed() {
 
     for (let j = 1; j <= 4; j++) {
       const dev = await upsertUser({
-        email: `dev${i}_${j}@pointfex.dev`, fullName: `Dev ${i}-${j}`, role: UserRole.DEVELOPER,
+        email: `dev${i}_${j}@seu.edu.bd`, fullName: `Dev ${i}-${j}`, role: UserRole.DEVELOPER,
         studentId: `CSE${String(studentSeq++).padStart(3, '0')}`, password: MEMBER_PASSWORD,
       });
       await prisma.squadMembership.upsert({
@@ -174,6 +198,23 @@ export async function runDemoSeed() {
       });
     }
   }
+
+  // Seed demo product for Squad 1
+  const squad1 = await prisma.squad.findUnique({ where: { name: 'Squad 1' } });
+  if (squad1) {
+    await prisma.product.upsert({
+      where: { apiKey: 'pfx_demo_squad_1_key' },
+      update: {},
+      create: {
+        squadId: squad1.id,
+        name: 'Squad 1 Flagship SaaS',
+        liveUrl: 'https://squad1.pointfex.dev',
+        apiKey: 'pfx_demo_squad_1_key',
+        isClientProduct: false,
+      },
+    });
+  }
+
   console.log(`Demo dataset ready: execs + 6 squads (PM + 4 devs each), member password: ${MEMBER_PASSWORD}`);
 }
 

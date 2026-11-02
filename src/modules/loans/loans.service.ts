@@ -3,6 +3,7 @@ import { UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { SettingsService } from '../settings/settings.service';
+import { EventsGateway } from '../../events/events.gateway';
 import { AuthUser, isExecRole, isBoardRole, isOverrideRole } from '../../common/types';
 import { AppException } from '../../common/exceptions/app.exception';
 
@@ -17,6 +18,7 @@ export class LoansService {
     private readonly prisma: PrismaService,
     private readonly ledger: LedgerService,
     private readonly settings: SettingsService,
+    private readonly events: EventsGateway,
   ) {}
 
   async apply(user: AuthUser, dto: { squadId: string; principalAmount: number }) {
@@ -72,6 +74,12 @@ export class LoansService {
         await this.prisma.loan.update({ where: { id: loan.id }, data: { status: 'DEFAULTED' } });
         await this.prisma.squad.update({ where: { id: loan.borrowerSquadId }, data: { healthStatus: 'BANKRUPT_RISK' } });
         loan.status = 'DEFAULTED';
+        this.events.emitToStudio('health:alert', {
+          squadId: loan.borrowerSquadId,
+          metric: 'loan_default',
+          status: 'BANKRUPT_RISK',
+          currentRunway: 0,
+        });
       }
     }
     return loans;

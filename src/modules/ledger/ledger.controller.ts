@@ -54,7 +54,7 @@ export class LedgerController {
     await this.prisma.executiveAuditLog.create({
       data: {
         executiveId: user.id,
-        executiveRole: user.role,
+        executiveRole: (user.role as UserRole) || UserRole.CEO,
         actionType: dto.freeze ? 'ACCOUNT_FROZEN' : 'ACCOUNT_UNFROZEN',
         payloadSnapshot: { accountId, reason: dto.reason },
         riskSeverity: 'WARNING',

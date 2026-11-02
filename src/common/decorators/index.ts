@@ -3,7 +3,7 @@ import { UserRole } from '@prisma/client';
 import { AuthUser } from '../types';
 
 export const ROLES_KEY = 'roles';
-export const Roles = (...roles: UserRole[]) => SetMetadata(ROLES_KEY, roles);
+export const Roles = (...roles: (UserRole | string)[]) => SetMetadata(ROLES_KEY, roles);
 
 export const IS_PUBLIC_KEY = 'isPublic';
 export const Public = () => SetMetadata(IS_PUBLIC_KEY, true);

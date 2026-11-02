@@ -3,7 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { SettingsService } from '../settings/settings.service';
 import { AppException } from '../../common/exceptions/app.exception';
-import { UserRole } from '@prisma/client';
+import { Prisma, UserRole } from '@prisma/client';
 import { isExecRole, isOverrideRole } from '../../common/types';
 
 /**
@@ -18,7 +18,7 @@ export class SquadsService {
     private readonly settings: SettingsService,
   ) {}
 
-  async listSquads(user: { id: string; role: UserRole; squadIds: string[] }) {
+  async listSquads(user: { id: string; role: string; squadIds: string[] }) {
     const isExec = isExecRole(user.role);
     const squads = await this.prisma.squad.findMany({
       where: {
@@ -40,7 +40,7 @@ export class SquadsService {
     }));
   }
 
-  async getSquad(user: { id: string; role: UserRole; squadIds: string[] }, squadId: string) {
+  async getSquad(user: { id: string; role: string; squadIds: string[] }, squadId: string) {
     const isExec = isExecRole(user.role);
     if (!isExec && !user.squadIds.includes(squadId)) {
       throw new ForbiddenException('AUTHZ_CROSS_SQUAD');
@@ -79,40 +79,32 @@ export class SquadsService {
 
   /** CPO/CEO: create a squad + treasury, optionally funded from SYSTEM_RESERVE. */
   async createSquad(user: { id: string }, dto: { name: string; description?: string; initialBalance?: number }) {
-    const existing = await this.prisma.squad.findUnique({ where: { name: dto.name } });
-    if (existing) throw new AppException('CONFLICT', `A squad named "${dto.name}" already exists`);
-
-    const squad = await this.prisma.squad.create({
-      data: { name: dto.name, description: dto.description },
-    });
-    await this.prisma.account.create({
-      data: { squadId: squad.id, type: 'SQUAD_TREASURY', balance: 0, currency: 'BDT' },
-    });
-
     const initial = dto.initialBalance ?? (await this.settings.getNumber('SQUAD_INITIAL_BALANCE', 100000));
-    if (initial > 0) {
-      const reserve = await this.ledger.systemReserve();
-      const treasury = await this.ledger.squadTreasury(squad.id);
-      await this.ledger.executeDoubleEntryTransfer({
-        senderAccountId: reserve.id,
-        recipientAccountId: treasury.id,
-        amount: initial,
-        referenceType: 'SQUAD_FUNDING',
-        referenceId: squad.id,
-        description: `Initial treasury funding for ${squad.name}`,
-        idempotencyKey: `squad_funding_${squad.id}`,
-        authorizedById: user.id,
+    const created = await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.squad.findUnique({ where: { name: dto.name } });
+      if (existing) throw new AppException('CONFLICT', `A squad named "${dto.name}" already exists`);
+      const squad = await tx.squad.create({ data: { name: dto.name, description: dto.description } });
+      const treasury = await tx.account.create({
+        data: { squadId: squad.id, type: 'SQUAD_TREASURY', balance: 0, currency: 'BDT' },
       });
-    }
-
-    const fresh = await this.prisma.squad.findUnique({ where: { id: squad.id }, include: { account: true } });
-    return {
-      id: fresh!.id,
-      name: fresh!.name,
-      description: fresh!.description,
-      isActive: fresh!.isActive,
-      balance: fresh!.account ? Number(fresh!.account.balance) : 0,
-    };
+      let accountIds: string[] = [];
+      if (initial > 0) {
+        const reserve = await this.ledger.systemReserve(tx);
+        accountIds = [reserve.id, treasury.id];
+        await this.ledger.postTransaction({
+          entries: [
+            { accountId: reserve.id, direction: 'DEBIT', amount: initial },
+            { accountId: treasury.id, direction: 'CREDIT', amount: initial },
+          ],
+          referenceType: 'SQUAD_FUNDING', referenceId: squad.id,
+          description: `Initial treasury funding for ${squad.name}`,
+          idempotencyKey: `squad_funding_${squad.id}`, authorizedById: user.id,
+        }, tx);
+      }
+      return { squad: { ...squad, balance: initial > 0 ? initial : 0 }, accountIds };
+    }, { timeout: 15000 });
+    if (created.accountIds.length) await this.ledger.publishBalanceUpdates(created.accountIds);
+    return created.squad;
   }
 
   /** CPO/CEO: rename / re-describe / (de)activate a squad. */
@@ -143,7 +135,7 @@ export class SquadsService {
     return m ? { owner: m[1], repo: m[2] } : null;
   }
 
-  private async assertSquadManager(user: { id: string; role: UserRole }, squadId: string) {
+  private async assertSquadManager(user: { id: string; role: string }, squadId: string) {
     if (isExecRole(user.role)) return;
     const m = await this.prisma.squadMembership.findFirst({
       where: { userId: user.id, squadId, role: 'PM', leftAt: null },
@@ -151,7 +143,7 @@ export class SquadsService {
     if (!m) throw new ForbiddenException('Only the squad PM or a C-level executive may manage the squad repositories');
   }
 
-  private async assertSquadMemberOrExec(user: { id: string; role: UserRole }, squadId: string) {
+  private async assertSquadMemberOrExec(user: { id: string; role: string }, squadId: string) {
     if (isExecRole(user.role)) return;
     const m = await this.prisma.squadMembership.findFirst({
       where: { userId: user.id, squadId, leftAt: null },
@@ -176,6 +168,9 @@ export class SquadsService {
     if (res.status === 403 || res.status === 429) {
       throw new BadRequestException('GitHub API rate limit reached. Connect the repository with a Personal Access Token to raise the limit.');
     }
+    if (res.status === 204) {
+      return [];
+    }
     if (!res.ok) {
       const body = (await res.text()).slice(0, 160);
       throw new BadRequestException(`GitHub API ${res.status}: ${body}`);
@@ -183,7 +178,7 @@ export class SquadsService {
     return res.json();
   }
 
-  async listRepos(user: { id: string; role: UserRole }, squadId: string) {
+  async listRepos(user: { id: string; role: string }, squadId: string) {
     await this.assertSquadMemberOrExec(user, squadId);
     const repos = await this.prisma.squadRepository.findMany({
       where: { squadId, isActive: true },
@@ -192,7 +187,7 @@ export class SquadsService {
     return repos.map((r) => ({ id: r.id, name: r.name, owner: r.owner, repo: r.repo, repoUrl: r.repoUrl, createdAt: r.createdAt }));
   }
 
-  async addRepo(user: { id: string; role: UserRole }, squadId: string, dto: { repoUrl: string; name?: string; token?: string }) {
+  async addRepo(user: { id: string; role: string }, squadId: string, dto: { repoUrl: string; name?: string; token?: string }) {
     await this.assertSquadManager(user, squadId);
     const parsed = this.parseGithubUrl(dto.repoUrl);
     if (!parsed) throw new BadRequestException('Invalid GitHub repository URL — expected https://github.com/<owner>/<repo>');
@@ -200,9 +195,9 @@ export class SquadsService {
     const dup = await this.prisma.squadRepository.findUnique({
       where: { squadId_owner_repo: { squadId, owner: parsed.owner, repo: parsed.repo } },
     });
-    if (dup && dup.isActive) throw new AppException('CONFLICT', 'This repository is already connected to the squad');
+    if (dup) throw new AppException('CONFLICT', 'This repository is already connected to the squad');
 
-    return this.prisma.squadRepository.create({
+    const created = await this.prisma.squadRepository.create({
       data: {
         squadId,
         name: dto.name?.trim() || `${parsed.owner}/${parsed.repo}`,
@@ -212,9 +207,20 @@ export class SquadsService {
         token: dto.token?.trim() || null,
       },
     });
+
+    return {
+      id: created.id,
+      squadId: created.squadId,
+      name: created.name,
+      owner: created.owner,
+      repo: created.repo,
+      repoUrl: created.repoUrl,
+      hasToken: Boolean(created.token),
+      createdAt: created.createdAt,
+    };
   }
 
-  async removeRepo(user: { id: string; role: UserRole }, squadId: string, repoId: string) {
+  async removeRepo(user: { id: string; role: string }, squadId: string, repoId: string) {
     await this.assertSquadManager(user, squadId);
     const repo = await this.prisma.squadRepository.findFirst({ where: { id: repoId, squadId } });
     if (!repo) throw new NotFoundException('Repository not found');
@@ -229,7 +235,7 @@ export class SquadsService {
   }
 
   /** Recent commits for one connected repo. */
-  async repoActivity(user: { id: string; role: UserRole }, squadId: string, repoId: string) {
+  async repoActivity(user: { id: string; role: string }, squadId: string, repoId: string) {
     await this.assertSquadMemberOrExec(user, squadId);
     const r = await this.getRepoEntity(squadId, repoId);
     const commits = (await this.gh(`/repos/${r.owner}/${r.repo}/commits?per_page=30`, r.token)) as any[];
@@ -248,7 +254,7 @@ export class SquadsService {
   }
 
   /** Repo summary: stack (languages), contributors, code size, stars, forks, issues. */
-  async repoSummary(user: { id: string; role: UserRole }, squadId: string, repoId: string) {
+  async repoSummary(user: { id: string; role: string }, squadId: string, repoId: string) {
     await this.assertSquadMemberOrExec(user, squadId);
     const r = await this.getRepoEntity(squadId, repoId);
     const base = `/repos/${r.owner}/${r.repo}`;
@@ -291,8 +297,9 @@ export class SquadsService {
   }
 
   /** Sum of a user's active allocations must stay <= 1.0 (BR-CHRO-02). */
-  private async assertAllocationBudget(userId: string, extraAllocation: number) {
-    const agg = await this.prisma.squadMembership.aggregate({
+  private async assertAllocationBudget(userId: string, extraAllocation: number, tx: Prisma.TransactionClient) {
+    await tx.$queryRaw(Prisma.sql`SELECT id FROM "User" WHERE id = ${userId}::uuid FOR UPDATE`);
+    const agg = await tx.squadMembership.aggregate({
       where: { userId, leftAt: null },
       _sum: { allocation: true },
     });
@@ -306,10 +313,12 @@ export class SquadsService {
 
   /** CPO adds a member (BR-CHRO-01..04). PM role requires allocation 1.0 and squad must not already have a PM. */
   async addMember(cpoUserId: string, squadId: string, dto: { userId: string; role: 'PM' | 'DEVELOPER'; allocation: number }) {
-    const squad = await this.prisma.squad.findUnique({ where: { id: squadId } });
+    return this.prisma.$transaction(async (tx) => {
+    await tx.$queryRaw(Prisma.sql`SELECT id FROM "Squad" WHERE id = ${squadId}::uuid FOR UPDATE`);
+    const squad = await tx.squad.findUnique({ where: { id: squadId } });
     if (!squad) throw new NotFoundException('Squad not found');
 
-    const existing = await this.prisma.squadMembership.findUnique({
+    const existing = await tx.squadMembership.findUnique({
       where: { userId_squadId: { userId: dto.userId, squadId } },
     });
     if (existing && !existing.leftAt) {
@@ -320,27 +329,32 @@ export class SquadsService {
       if (dto.allocation < 1.0 - 1e-9) {
         throw new BadRequestException('Squad PM must hold allocation = 1.0 (BR-CHRO-03)');
       }
-      const hasPM = await this.prisma.squadMembership.findFirst({ where: { squadId, role: 'PM', leftAt: null } });
+      const hasPM = await tx.squadMembership.findFirst({ where: { squadId, role: 'PM', leftAt: null } });
       if (hasPM) throw new BadRequestException('Squad already has a primary PM (BR-CHRO-03)');
     }
 
-    await this.assertAllocationBudget(dto.userId, dto.allocation);
+    await this.assertAllocationBudget(dto.userId, dto.allocation, tx);
 
-    const membership = await this.prisma.squadMembership.create({
-      data: {
+    const membership = existing
+      ? await tx.squadMembership.update({ where: { id: existing.id }, data: {
+          role: dto.role, allocation: dto.allocation, isPrimary: dto.role === 'PM', leftAt: null, joinedAt: new Date(),
+        } })
+      : await tx.squadMembership.create({ data: {
         userId: dto.userId,
         squadId,
         role: dto.role,
         allocation: dto.allocation,
         isPrimary: dto.role === 'PM',
-      },
-    });
+      } });
     return membership;
+    });
   }
 
   /** CPO removes a member; the squad pays the SWAP_FEE (BR-CHRO-20..22). */
   async removeMember(cpoUserId: string, squadId: string, userId: string, idempotencyKey: string) {
-    const membership = await this.prisma.squadMembership.findUnique({
+    const result = await this.prisma.$transaction(async (tx) => {
+    await tx.$queryRaw(Prisma.sql`SELECT id FROM "Squad" WHERE id = ${squadId}::uuid FOR UPDATE`);
+    const membership = await tx.squadMembership.findUnique({
       where: { userId_squadId: { userId, squadId } },
     });
     if (!membership || membership.leftAt) throw new NotFoundException('Active membership not found');
@@ -350,10 +364,11 @@ export class SquadsService {
     const cpoCut = Math.round(fee * cutRate * 100) / 100;
     const reserveCut = fee - cpoCut;
 
-    const squadAcc = await this.ledger.squadTreasury(squadId);
-    const cpoAcc = await this.ledger.personalWallet(cpoUserId);
-    const reserveAcc = await this.ledger.systemReserve();
+    const squadAcc = await this.ledger.squadTreasury(squadId, tx);
+    const cpoAcc = await this.ledger.personalWallet(cpoUserId, tx);
+    const reserveAcc = await this.ledger.systemReserve(tx);
 
+    const accountIds = [squadAcc.id, cpoAcc.id, reserveAcc.id];
     await this.ledger.postTransaction({
       entries: [
         { accountId: squadAcc.id, direction: 'DEBIT', amount: fee },
@@ -365,12 +380,16 @@ export class SquadsService {
       description: `Squad membership termination fee for user ${userId}`,
       idempotencyKey: idempotencyKey || `swapfee_${membership.id}_${Date.now()}`,
       authorizedById: cpoUserId,
-    });
+    }, tx);
 
-    return this.prisma.squadMembership.update({
+    const updated = await tx.squadMembership.update({
       where: { id: membership.id },
       data: { leftAt: new Date() },
     });
+    return { updated, accountIds };
+    }, { timeout: 15000 });
+    await this.ledger.publishBalanceUpdates(result.accountIds);
+    return result.updated;
   }
 
   /** CPO transfers a member between squads; destination squad pays the fee. */
@@ -380,30 +399,43 @@ export class SquadsService {
     idempotencyKey: string,
   ) {
     if (dto.fromSquadId === dto.toSquadId) throw new BadRequestException('Source and destination squads identical');
-
-    const membership = await this.prisma.squadMembership.findUnique({
+    const result = await this.prisma.$transaction(async (tx) => {
+    const squadIds = [dto.fromSquadId, dto.toSquadId].sort();
+    for (const id of squadIds) await tx.$queryRaw(Prisma.sql`SELECT id FROM "Squad" WHERE id = ${id}::uuid FOR UPDATE`);
+    const membership = await tx.squadMembership.findUnique({
       where: { userId_squadId: { userId: dto.userId, squadId: dto.fromSquadId } },
     });
     if (!membership || membership.leftAt) throw new NotFoundException('Active source membership not found');
 
     // Close old, open new
-    await this.prisma.squadMembership.update({
+    await tx.squadMembership.update({
       where: { id: membership.id },
       data: { leftAt: new Date() },
     });
 
     const allocation = dto.allocation ?? Number(membership.allocation);
-    await this.assertAllocationBudget(dto.userId, allocation - Number(membership.allocation));
+    if (membership.role === 'PM' && allocation < 1.0 - 1e-9) {
+      throw new BadRequestException('Squad PM must hold allocation = 1.0 (BR-CHRO-03)');
+    }
+    // The source membership is already inactive in this transaction, so only the destination allocation remains to add.
+    await this.assertAllocationBudget(dto.userId, allocation, tx);
 
-    const created = await this.prisma.squadMembership.create({
-      data: {
+    const prior = await tx.squadMembership.findUnique({ where: { userId_squadId: { userId: dto.userId, squadId: dto.toSquadId } } });
+    if (prior && !prior.leftAt) throw new BadRequestException('User is already an active member of the destination squad');
+    if (membership.role === 'PM' && await tx.squadMembership.findFirst({ where: { squadId: dto.toSquadId, role: 'PM', leftAt: null } })) {
+      throw new BadRequestException('Destination squad already has a primary PM (BR-CHRO-03)');
+    }
+    const created = prior
+      ? await tx.squadMembership.update({ where: { id: prior.id }, data: {
+          role: membership.role, allocation, isPrimary: membership.isPrimary, leftAt: null, joinedAt: new Date(),
+        } })
+      : await tx.squadMembership.create({ data: {
         userId: dto.userId,
         squadId: dto.toSquadId,
         role: membership.role,
         allocation,
         isPrimary: membership.isPrimary,
-      },
-    });
+      } });
 
     // Charge fee to destination squad treasury
     const fee = await this.settings.getNumber('SWAP_FEE', 5000);
@@ -411,10 +443,10 @@ export class SquadsService {
     const cpoCut = Math.round(fee * cutRate * 100) / 100;
     const reserveCut = fee - cpoCut;
 
-    try {
-      const squadAcc = await this.ledger.squadTreasury(dto.toSquadId);
-      const cpoAcc = await this.ledger.personalWallet(cpoUserId);
-      const reserveAcc = await this.ledger.systemReserve();
+      const squadAcc = await this.ledger.squadTreasury(dto.toSquadId, tx);
+      const cpoAcc = await this.ledger.personalWallet(cpoUserId, tx);
+      const reserveAcc = await this.ledger.systemReserve(tx);
+      const accountIds = [squadAcc.id, cpoAcc.id, reserveAcc.id];
       await this.ledger.postTransaction({
         entries: [
           { accountId: squadAcc.id, direction: 'DEBIT', amount: fee },
@@ -426,15 +458,11 @@ export class SquadsService {
         description: `Squad transfer fee for user ${dto.userId}`,
         idempotencyKey: idempotencyKey || `swapfee_${created.id}_${Date.now()}`,
         authorizedById: cpoUserId,
-      });
-    } catch (err) {
-      // Roll back the roster move if the fee could not be charged
-      await this.prisma.squadMembership.delete({ where: { id: created.id } });
-      await this.prisma.squadMembership.update({ where: { id: membership.id }, data: { leftAt: null } });
-      throw err;
-    }
-
-    return created;
+      }, tx);
+    return { created, accountIds };
+    }, { timeout: 15000 });
+    await this.ledger.publishBalanceUpdates(result.accountIds);
+    return result.created;
   }
 
   async assertMembership(userId: string, squadId: string) {
@@ -443,7 +471,7 @@ export class SquadsService {
     return m;
   }
 
-  async assertSquadPMOrExec(userId: string, role: UserRole, squadId: string) {
+  async assertSquadPMOrExec(userId: string, role: string, squadId: string) {
     if (isOverrideRole(role)) return;
     const m = await this.prisma.squadMembership.findFirst({ where: { userId, squadId, role: 'PM', leftAt: null } });
     if (!m) throw new ForbiddenException('Only the squad PM or an executive may perform this action');
