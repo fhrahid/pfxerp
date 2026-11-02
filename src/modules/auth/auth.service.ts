@@ -114,7 +114,9 @@ export class AuthService {
       await this.prisma.executiveAuditLog.create({
         data: {
           executiveId: user.id,
-          executiveRole: (user.role as UserRole) || UserRole.CEO,
+          executiveRole: Object.values(UserRole).includes(user.role as any)
+            ? (user.role as UserRole)
+            : UserRole.CEO,
           actionType: 'REFRESH_TOKEN_REUSE_DETECTED',
           payloadSnapshot: { userId: user.id, at: new Date().toISOString() },
           riskSeverity: 'CRITICAL',

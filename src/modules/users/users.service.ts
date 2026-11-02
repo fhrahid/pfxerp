@@ -43,11 +43,26 @@ export class UsersService {
     };
   }
 
-  async createUser(dto: CreateUserDto) {
+  async createUser(dto: CreateUserDto, caller?: { role: string }) {
     const email = dto.email.trim().toLowerCase();
     if (!isAllowedEmailDomain(email)) {
       throw new AppException('VALIDATION_FAILED', 'Email must be an @seu.edu.bd address');
     }
+
+    const roleName = (dto.role || 'DEVELOPER').trim().toUpperCase();
+    const roleExists = await this.prisma.role.findFirst({
+      where: { name: { equals: roleName, mode: 'insensitive' } },
+    });
+    if (!roleExists) {
+      throw new AppException('VALIDATION_FAILED', `Role '${dto.role}' does not exist.`);
+    }
+
+    if (caller && caller.role !== UserRole.CEO) {
+      if (roleExists.name !== 'DEVELOPER' && roleExists.name !== 'PM') {
+        throw new AppException('AUTHZ_FORBIDDEN', 'Only the CEO can assign executive or custom roles.');
+      }
+    }
+
     const existing = await this.prisma.user.findFirst({
       where: { email: { equals: email, mode: 'insensitive' } },
     });
@@ -65,7 +80,7 @@ export class UsersService {
         email,
         fullName: dto.fullName,
         passwordHash,
-        role: dto.role,
+        role: roleExists.name,
         studentId,
         isActive: true,
       },
@@ -79,9 +94,26 @@ export class UsersService {
     return this.safe(user);
   }
 
-  async updateUser(userId: string, dto: UpdateUserDto) {
+  async updateUser(userId: string, dto: UpdateUserDto, caller?: { role: string }) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
+
+    let assignedRole: string | undefined = undefined;
+    if (dto.role) {
+      const roleName = dto.role.trim().toUpperCase();
+      const roleExists = await this.prisma.role.findFirst({
+        where: { name: { equals: roleName, mode: 'insensitive' } },
+      });
+      if (!roleExists) {
+        throw new AppException('VALIDATION_FAILED', `Role '${dto.role}' does not exist.`);
+      }
+      if (caller && caller.role !== UserRole.CEO) {
+        if (roleExists.name !== 'DEVELOPER' && roleExists.name !== 'PM') {
+          throw new AppException('AUTHZ_FORBIDDEN', 'Only the CEO can assign executive or custom roles.');
+        }
+      }
+      assignedRole = roleExists.name;
+    }
 
     // Blank student IDs become NULL — Postgres UNIQUE allows many NULLs but only one ''
     const studentId = dto.studentId === undefined ? undefined : dto.studentId?.trim() || null;
@@ -106,7 +138,7 @@ export class UsersService {
       data: {
         ...(dto.fullName ? { fullName: dto.fullName } : {}),
         ...(email !== undefined ? { email } : {}),
-        ...(dto.role ? { role: dto.role } : {}),
+        ...(assignedRole ? { role: assignedRole } : {}),
         ...(studentId !== undefined ? { studentId } : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
         ...(dto.password ? { passwordHash: await bcrypt.hash(dto.password, 12) } : {}),

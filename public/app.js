@@ -724,21 +724,50 @@ function uiCopy(text) {
   navigator.clipboard?.writeText(text).then(() => toast('Copied: ' + text));
 }
 
-function uiUserCreate() {
+async function uiUserCreate() {
+  let roleOptions = [
+    { value: 'DEVELOPER', label: 'DEVELOPER' },
+    { value: 'PM', label: 'PM' },
+  ];
+  try {
+    const list = await api('GET', '/roles');
+    if (Array.isArray(list) && list.length > 0) {
+      roleOptions = isCEO()
+        ? list.map((r) => ({ value: r.name, label: r.description ? `${r.name} (${r.description})` : r.name }))
+        : roleOptions;
+    }
+  } catch (_) {}
+
   formModal('Create member profile', [
     { name: 'fullName', label: 'Full name', required: true, placeholder: 'Ayesha Rahman' },
     { name: 'email', label: 'Email', type: 'text', hint: 'email', required: true, placeholder: 'ayesha@seu.edu.bd' },
     { name: 'password', label: 'Temporary password (min 8 chars)', required: true, value: 'Pointfex-' + Math.random().toString(36).slice(2, 8) },
-    { name: 'role', label: 'Role', type: 'select', options: ['DEVELOPER', 'PM', 'CFO', 'CTO', 'CPO', 'CEO'].map((r) => ({ value: r, label: r })) },
+    { name: 'role', label: 'Role', type: 'select', value: 'DEVELOPER', options: roleOptions },
     { name: 'studentId', label: 'Student ID (optional)', placeholder: 'CSE034' },
   ], 'Create profile', (d) => api('POST', '/users', { ...d, studentId: d.studentId || undefined }));
 }
 
-function uiUserEdit(id, fullName, email, role, studentId) {
+async function uiUserEdit(id, fullName, email, role, studentId) {
+  let roleOptions = [
+    { value: 'DEVELOPER', label: 'DEVELOPER' },
+    { value: 'PM', label: 'PM' },
+  ];
+  try {
+    const list = await api('GET', '/roles');
+    if (Array.isArray(list) && list.length > 0) {
+      roleOptions = isCEO()
+        ? list.map((r) => ({ value: r.name, label: r.description ? `${r.name} (${r.description})` : r.name }))
+        : roleOptions;
+    }
+  } catch (_) {}
+  if (!roleOptions.some((o) => o.value === role)) {
+    roleOptions.push({ value: role, label: role });
+  }
+
   formModal('Edit member', [
     { name: 'fullName', label: 'Full name', value: fullName, required: true },
     { name: 'email', label: 'Email', type: 'text', hint: 'email', value: email, required: true },
-    { name: 'role', label: 'Role', type: 'select', value: role, options: ['DEVELOPER', 'PM', 'CFO', 'CTO', 'CPO', 'CEO'].map((r) => ({ value: r, label: r })) },
+    { name: 'role', label: 'Role', type: 'select', value: role, options: roleOptions },
     { name: 'studentId', label: 'Student ID', value: studentId },
     { name: 'password', label: 'New password (leave blank to keep)', placeholder: 'min 8 chars' },
     { name: 'isActive', label: 'Active (uncheck to deactivate & revoke sessions)', type: 'checkbox', value: true },

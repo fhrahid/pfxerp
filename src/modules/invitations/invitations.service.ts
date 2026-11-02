@@ -179,6 +179,13 @@ export class InvitationsService {
       throw new AppException('NOT_FOUND', 'Invitation not found.');
     }
 
+    if (inviter.role !== UserRole.CEO && invitation.role !== 'DEVELOPER' && invitation.role !== 'PM') {
+      throw new AppException(
+        'AUTHZ_FORBIDDEN',
+        'Only the CEO can resend invitations for executive and custom roles.',
+      );
+    }
+
     if (invitation.status === 'ACCEPTED') {
       throw new AppException('CONFLICT', 'This invitation has already been accepted and the account is active.');
     }
@@ -239,6 +246,13 @@ export class InvitationsService {
     const invitation = await this.prisma.invitation.findUnique({ where: { id } });
     if (!invitation) {
       throw new AppException('NOT_FOUND', 'Invitation not found.');
+    }
+
+    if (inviter.role !== UserRole.CEO && invitation.role !== 'DEVELOPER' && invitation.role !== 'PM') {
+      throw new AppException(
+        'AUTHZ_FORBIDDEN',
+        'Only the CEO can revoke invitations for executive and custom roles.',
+      );
     }
 
     if (invitation.status === 'ACCEPTED') {

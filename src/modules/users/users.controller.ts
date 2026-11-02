@@ -92,8 +92,8 @@ export class UsersController {
   /** CPO/CEO: create a member profile (wallet auto-provisioned). */
   @Post()
   @Roles(UserRole.CPO, UserRole.CEO)
-  create(@Body() dto: CreateUserDto) {
-    return this.usersService.createUser(dto);
+  create(@Body() dto: CreateUserDto, @CurrentUser() caller: AuthUser) {
+    return this.usersService.createUser(dto, caller);
   }
 
   /** Developers/PMs may only fetch themselves; executives may fetch anyone. */
@@ -120,7 +120,7 @@ export class UsersController {
   /** CPO/CEO: update a profile (rename, role change, password reset, deactivate). */
   @Patch(':id')
   @Roles(UserRole.CPO, UserRole.CEO)
-  update(@Param('id') id: string, @Body() dto: UpdateUserDto) {
-    return this.usersService.updateUser(id, dto);
+  update(@Param('id') id: string, @Body() dto: UpdateUserDto, @CurrentUser() caller: AuthUser) {
+    return this.usersService.updateUser(id, dto, caller);
   }
 }

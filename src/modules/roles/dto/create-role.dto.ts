@@ -23,3 +23,4 @@ export class CreateRoleDto {
   @Length(0, 255)
   description?: string;
 }
+
