@@ -103,6 +103,20 @@ body {
 label.check { display: flex !important; flex-direction: row !important; align-items: center; gap: 8px; }
 label.check input { width: auto !important; margin: 0 !important; }
 
+/* ---------- sprint chip ---------- */
+.sprint-chip {
+  display: inline-flex; align-items: center; padding: 5px 14px; border-radius: 20px;
+  background: #3a3010; color: var(--gold); font-weight: 700; font-size: 12.5px; letter-spacing: .4px;
+}
+.sprint-chip.editable { cursor: pointer; border: 1px dashed #6b5a1d; }
+.sprint-chip.editable:hover { background: #4a3d13; }
+
+/* ---------- github commit feed ---------- */
+.commit { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin-bottom: 6px; background: var(--panel2); }
+.commit .msg { font-size: 12.5px; }
+.commit .sha { font-family: ui-monospace, Consolas, monospace; color: var(--accent); background: #14294d; padding: 1px 6px; border-radius: 5px; font-size: 11px; }
+.commit .meta { color: var(--muted); font-size: 11.5px; margin-top: 3px; }
+
 /* ---------- cards / grid ---------- */
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin-bottom: 18px; }
 .card {

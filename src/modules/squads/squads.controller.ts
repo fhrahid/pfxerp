@@ -1,10 +1,20 @@
-import { Body, Controller, Delete, Get, Headers, Param, Patch, Post } from '@nestjs/common';
-import { IsIn, IsInt, IsNumber, IsOptional, IsString, IsUUID, Max, Min, MinLength } from 'class-validator';
+import { Body, Controller, Delete, Get, Headers, Param, Patch, Post, Put } from '@nestjs/common';
+import { IsIn, IsInt, IsOptional, IsNumber, IsString, IsUUID, Max, Min, MinLength } from 'class-validator';
 import { UserRole } from '@prisma/client';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Roles, CurrentUser } from '../../common/decorators';
 import { AuthUser } from '../../common/types';
 import { SquadsService } from './squads.service';
+
+class GithubRepoDto {
+  @IsString()
+  @MinLength(11)
+  repoUrl: string;
+
+  @IsOptional()
+  @IsString()
+  token?: string;
+}
 
 class AddMemberDto {
   @IsUUID()
@@ -92,6 +102,19 @@ export class SquadsController {
   @Roles(UserRole.CPO, UserRole.CEO)
   update(@Param('id') id: string, @Body() dto: UpdateSquadDto) {
     return this.squads.updateSquad(id, dto);
+  }
+
+  /** Connect the squad's GitHub repo (squad PM or C-level). */
+  @Put(':id/github')
+  @Roles(UserRole.PM, UserRole.CEO, UserRole.CFO, UserRole.CTO, UserRole.CPO)
+  connectGithub(@Param('id') id: string, @Body() dto: GithubRepoDto, @CurrentUser() user: AuthUser) {
+    return this.squads.setGithubRepo(user, id, dto);
+  }
+
+  /** Recent commits for the squad's repo (squad members + C-level). */
+  @Get(':id/github/activity')
+  githubActivity(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.squads.githubActivity(user, id);
   }
 
   /** CPO roster management (chro.md §2.5). */
