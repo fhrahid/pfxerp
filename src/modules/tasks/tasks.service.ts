@@ -257,7 +257,61 @@ export class TasksService {
       storyPoints: task.storyPoints,
       priority: task.priority,
     });
-    return task;
+    return this.enrichTaskWithDeadline(task);
+  }
+
+  private enrichTaskWithDeadline<T extends { dueDate?: Date | null; status?: any; flaggedCompleteAt?: Date | null; ctoVerifiedAt?: Date | null; updatedAt?: Date }>(task: T) {
+    const now = new Date();
+    const isCompleted = task.status === 'CTO_VERIFIED' || task.status === 'CLOSED';
+    let isOverdue = false;
+    let completedLate = false;
+
+    if (task.dueDate) {
+      const due = new Date(task.dueDate);
+      if (!isCompleted) {
+        isOverdue = due < now;
+      } else {
+        const completionTime = task.ctoVerifiedAt || task.flaggedCompleteAt || task.updatedAt;
+        if (completionTime && new Date(completionTime) > due) {
+          completedLate = true;
+        }
+      }
+    }
+    return {
+      ...task,
+      isOverdue,
+      completedLate,
+    };
+  }
+
+  async updateTask(user: AuthUser, taskId: string, dto: {
+    title?: string;
+    description?: string;
+    storyPoints?: number;
+    priority?: string;
+    dueDate?: string | null;
+    assignedToId?: string | null;
+  }) {
+    const task = await this.getTaskOrThrow(taskId);
+    await this.assertPmOrExec(user, task.squadId);
+
+    const updated = await this.prisma.task.update({
+      where: { id: taskId },
+      data: {
+        ...(dto.title !== undefined ? { title: dto.title } : {}),
+        ...(dto.description !== undefined ? { description: dto.description } : {}),
+        ...(dto.storyPoints !== undefined ? { storyPoints: dto.storyPoints } : {}),
+        ...(dto.priority !== undefined ? { priority: dto.priority as any } : {}),
+        ...(dto.dueDate !== undefined ? { dueDate: dto.dueDate ? new Date(dto.dueDate) : null } : {}),
+        ...(dto.assignedToId !== undefined ? { assignedToId: dto.assignedToId || null } : {}),
+      },
+      include: {
+        assignedTo: { select: { id: true, fullName: true } },
+        squad: { select: { id: true, name: true } },
+      },
+    });
+
+    return this.enrichTaskWithDeadline(updated);
   }
 
   async listTasks(user: AuthUser, filters: { squadId?: string; status?: TaskStatus; assignedToId?: string; sprintNumber?: number }) {
@@ -274,7 +328,7 @@ export class TasksService {
     if (filters.assignedToId === 'me') where.assignedToId = user.id;
     else if (filters.assignedToId) where.assignedToId = filters.assignedToId;
 
-    return this.prisma.task.findMany({
+    const tasks = await this.prisma.task.findMany({
       where,
       orderBy: { updatedAt: 'desc' },
       take: 200,
@@ -283,6 +337,7 @@ export class TasksService {
         squad: { select: { id: true, name: true } },
       },
     });
+    return tasks.map((t) => this.enrichTaskWithDeadline(t));
   }
 
   async getTask(user: AuthUser, taskId: string) {
@@ -297,7 +352,7 @@ export class TasksService {
     if (!task) throw new NotFoundException('Task not found');
     const isExec = isExecRole(user.role);
     if (!isExec && !user.squadIds.includes(task.squadId)) throw new ForbiddenException('AUTHZ_CROSS_SQUAD');
-    return task;
+    return this.enrichTaskWithDeadline(task);
   }
 
   private async assertPmOrExec(user: AuthUser, squadId: string) {

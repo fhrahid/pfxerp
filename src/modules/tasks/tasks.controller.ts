@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { IsBoolean, IsDateString, IsEnum, IsInt, IsOptional, IsString, IsUUID, Max, Min, MinLength } from 'class-validator';
 import { TaskPriority, TaskStatus, UserRole } from '@prisma/client';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
@@ -43,6 +43,35 @@ class CreateTaskDto {
   @IsOptional()
   @IsUUID()
   clientMilestoneId?: string;
+}
+
+class UpdateTaskDto {
+  @IsOptional()
+  @IsString()
+  @MinLength(3)
+  title?: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(13)
+  storyPoints?: number;
+
+  @IsOptional()
+  @IsEnum(TaskPriority)
+  priority?: TaskPriority;
+
+  @IsOptional()
+  @IsDateString()
+  dueDate?: string;
+
+  @IsOptional()
+  @IsUUID()
+  assignedToId?: string;
 }
 
 class FlagCompleteDto {
@@ -116,6 +145,12 @@ export class TasksController {
   @Get(':id')
   findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.tasks.getTask(user, id);
+  }
+
+  @Patch(':id')
+  @Roles(UserRole.PM, UserRole.CTO, UserRole.CPO, UserRole.CEO)
+  update(@Param('id') id: string, @Body() dto: UpdateTaskDto, @CurrentUser() user: AuthUser) {
+    return this.tasks.updateTask(user, id, dto);
   }
 
   @Post(':id/start')

@@ -167,6 +167,64 @@ export class DashboardService {
       include: { entries: { include: { account: true } }, authorizedBy: { select: { fullName: true, role: true } } },
     });
 
+    // Executive action logging and collusion detection (BR-CEO-11)
+    const [recentExecutiveAuditLogs, ctoCitations, auditCountsByExecutive] = await Promise.all([
+      this.prisma.executiveAuditLog.findMany({
+        orderBy: { createdAt: 'desc' },
+        take: 15,
+        include: {
+          executive: { select: { id: true, fullName: true, role: true } },
+        },
+      }),
+      this.prisma.codeAuditCitation.findMany({
+        select: { squadId: true, squad: { select: { name: true } } },
+      }),
+      this.prisma.executiveAuditLog.groupBy({
+        by: ['executiveId'],
+        _count: { id: true },
+      }),
+    ]);
+
+    const auditCountMap = new Map(auditCountsByExecutive.map((a) => [a.executiveId, a._count.id]));
+    const execBalances = executives.map((e) => Number(e.account?.balance || 0));
+    const totalExecBalance = execBalances.reduce((a, b) => a + b, 0);
+    const peerAvgBalance = executives.length ? totalExecBalance / executives.length : 0;
+
+    const citationsBySquad: Record<string, { name: string; count: number }> = {};
+    for (const c of ctoCitations) {
+      if (!citationsBySquad[c.squadId]) {
+        citationsBySquad[c.squadId] = { name: c.squad?.name || c.squadId, count: 0 };
+      }
+      citationsBySquad[c.squadId].count++;
+    }
+    const totalCitations = ctoCitations.length;
+
+    const enrichedExecutives = executives.map((e) => {
+      const bal = e.account ? Number(e.account.balance) : 0;
+      const anomalies: string[] = [];
+
+      if (peerAvgBalance > 0 && bal > peerAvgBalance * 1.5) {
+        anomalies.push('HIGH_WALLET_VELOCITY');
+      }
+
+      if (e.role === 'CTO' && totalCitations >= 3) {
+        for (const [, item] of Object.entries(citationsBySquad)) {
+          if (item.count / totalCitations > 0.6) {
+            anomalies.push(`CITATION_BIAS (${item.name}: ${Math.round((item.count / totalCitations) * 100)}%)`);
+          }
+        }
+      }
+
+      return {
+        id: e.id,
+        role: e.role,
+        name: e.fullName,
+        walletBalance: bal,
+        actionCount: auditCountMap.get(e.id) || 0,
+        anomalyFlags: anomalies,
+      };
+    });
+
     return {
       macro: {
         circulatingCash: Math.round(circulating * 100) / 100,
@@ -177,11 +235,7 @@ export class DashboardService {
         studioValuation: Math.round(squads.reduce((a, s) => a + s.valuation, 0) * 100) / 100,
       },
       squads: squadsWithMembers,
-      executives: executives.map((e) => ({
-        role: e.role,
-        name: e.fullName,
-        walletBalance: e.account ? Number(e.account.balance) : 0,
-      })),
+      executives: enrichedExecutives,
       pendingDecisionsCount: pendingDecisions,
       activeChaosIncidents: chaosIncidents,
       recentTransactions: recentTransactions.map((t) => ({
@@ -191,6 +245,15 @@ export class DashboardService {
         amount: t.entries.filter((e) => e.direction === 'DEBIT').reduce((a, e) => a + Number(e.amount), 0),
         by: t.authorizedBy.fullName,
         at: t.createdAt,
+      })),
+      recentExecutiveActions: recentExecutiveAuditLogs.map((log) => ({
+        id: log.id,
+        executiveName: log.executive?.fullName || 'Unknown',
+        executiveRole: log.executiveRole,
+        actionType: log.actionType,
+        riskSeverity: log.riskSeverity,
+        payload: log.payloadSnapshot,
+        createdAt: log.createdAt,
       })),
     };
   }
