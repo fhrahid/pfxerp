@@ -136,7 +136,7 @@ export class SquadsService {
   }
 
   // ------------------------------------------------------------------
-  // GitHub integration: connect a squad repo and browse its activity
+  // GitHub integration: multiple repos per squad, activity + summaries
   // ------------------------------------------------------------------
   private parseGithubUrl(url: string): { owner: string; repo: string } | null {
     const m = String(url || '').trim().match(/^(?:https?:\/\/)?(?:www\.)?github\.com\/([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i);
@@ -148,7 +148,7 @@ export class SquadsService {
     const m = await this.prisma.squadMembership.findFirst({
       where: { userId: user.id, squadId, role: 'PM', leftAt: null },
     });
-    if (!m) throw new ForbiddenException('Only the squad PM or a C-level executive may manage the squad repository');
+    if (!m) throw new ForbiddenException('Only the squad PM or a C-level executive may manage the squad repositories');
   }
 
   private async assertSquadMemberOrExec(user: { id: string; role: UserRole }, squadId: string) {
@@ -159,50 +159,84 @@ export class SquadsService {
     if (!m) throw new ForbiddenException('AUTHZ_CROSS_SQUAD');
   }
 
-  /** Connect (or replace) the squad's GitHub repository. PM of the squad or C-level. */
-  async setGithubRepo(user: { id: string; role: UserRole }, squadId: string, dto: { repoUrl: string; token?: string }) {
-    await this.assertSquadManager(user, squadId);
-    if (!this.parseGithubUrl(dto.repoUrl)) {
-      throw new BadRequestException('Invalid GitHub repository URL — expected https://github.com/<owner>/<repo>');
-    }
-    const updated = await this.prisma.squad.update({
-      where: { id: squadId },
-      data: { githubRepoUrl: dto.repoUrl.trim(), ...(dto.token !== undefined ? { githubToken: dto.token?.trim() || null } : {}) },
-    });
-    return { squadId, repoUrl: updated.githubRepoUrl, connected: true };
-  }
-
-  /** Recent commits for the squad's repo. Squad members and C-level. */
-  async githubActivity(user: { id: string; role: UserRole }, squadId: string) {
-    await this.assertSquadMemberOrExec(user, squadId);
-    const squad = await this.prisma.squad.findUnique({ where: { id: squadId } });
-    if (!squad) throw new NotFoundException('Squad not found');
-    if (!squad.githubRepoUrl) throw new BadRequestException('No GitHub repository connected to this squad yet');
-
-    const parsed = this.parseGithubUrl(squad.githubRepoUrl);
-    if (!parsed) throw new BadRequestException('Stored repository URL is invalid');
-
+  private async gh(path: string, token?: string | null) {
     let res: Response;
     try {
-      res = await fetch(`https://api.github.com/repos/${parsed.owner}/${parsed.repo}/commits?per_page=30`, {
+      res = await fetch(`https://api.github.com${path}`, {
         headers: {
           Accept: 'application/vnd.github+json',
           'User-Agent': 'pointfex-erp',
-          ...(squad.githubToken ? { Authorization: `Bearer ${squad.githubToken}` } : {}),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         signal: AbortSignal.timeout(10000),
       });
     } catch (e) {
-      throw new BadRequestException(`Could not reach GitHub (${(e as Error).name}). Check server connectivity or use a token for private repos.`);
+      throw new BadRequestException(`Could not reach GitHub (${(e as Error).name})`);
+    }
+    if (res.status === 403 || res.status === 429) {
+      throw new BadRequestException('GitHub API rate limit reached. Connect the repository with a Personal Access Token to raise the limit.');
     }
     if (!res.ok) {
-      const body = (await res.text()).slice(0, 200);
+      const body = (await res.text()).slice(0, 160);
       throw new BadRequestException(`GitHub API ${res.status}: ${body}`);
     }
-    const commits = (await res.json()) as any[];
+    return res.json();
+  }
+
+  async listRepos(user: { id: string; role: UserRole }, squadId: string) {
+    await this.assertSquadMemberOrExec(user, squadId);
+    const repos = await this.prisma.squadRepository.findMany({
+      where: { squadId, isActive: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    return repos.map((r) => ({ id: r.id, name: r.name, owner: r.owner, repo: r.repo, repoUrl: r.repoUrl, createdAt: r.createdAt }));
+  }
+
+  async addRepo(user: { id: string; role: UserRole }, squadId: string, dto: { repoUrl: string; name?: string; token?: string }) {
+    await this.assertSquadManager(user, squadId);
+    const parsed = this.parseGithubUrl(dto.repoUrl);
+    if (!parsed) throw new BadRequestException('Invalid GitHub repository URL — expected https://github.com/<owner>/<repo>');
+
+    const dup = await this.prisma.squadRepository.findUnique({
+      where: { squadId_owner_repo: { squadId, owner: parsed.owner, repo: parsed.repo } },
+    });
+    if (dup && dup.isActive) throw new AppException('CONFLICT', 'This repository is already connected to the squad');
+
+    return this.prisma.squadRepository.create({
+      data: {
+        squadId,
+        name: dto.name?.trim() || `${parsed.owner}/${parsed.repo}`,
+        owner: parsed.owner,
+        repo: parsed.repo,
+        repoUrl: dto.repoUrl.trim(),
+        token: dto.token?.trim() || null,
+      },
+    });
+  }
+
+  async removeRepo(user: { id: string; role: UserRole }, squadId: string, repoId: string) {
+    await this.assertSquadManager(user, squadId);
+    const repo = await this.prisma.squadRepository.findFirst({ where: { id: repoId, squadId } });
+    if (!repo) throw new NotFoundException('Repository not found');
+    await this.prisma.squadRepository.delete({ where: { id: repoId } });
+    return { removed: true };
+  }
+
+  private async getRepoEntity(squadId: string, repoId: string) {
+    const repo = await this.prisma.squadRepository.findFirst({ where: { id: repoId, squadId, isActive: true } });
+    if (!repo) throw new NotFoundException('Repository not connected to this squad');
+    return repo;
+  }
+
+  /** Recent commits for one connected repo. */
+  async repoActivity(user: { id: string; role: UserRole }, squadId: string, repoId: string) {
+    await this.assertSquadMemberOrExec(user, squadId);
+    const r = await this.getRepoEntity(squadId, repoId);
+    const commits = (await this.gh(`/repos/${r.owner}/${r.repo}/commits?per_page=30`, r.token)) as any[];
     return {
-      squadId,
-      repoUrl: squad.githubRepoUrl,
+      repoId: r.id,
+      name: r.name,
+      repoUrl: r.repoUrl,
       commits: commits.map((c) => ({
         sha: c.sha?.slice(0, 7),
         message: String(c.commit?.message || '').split('\n')[0],
@@ -210,6 +244,49 @@ export class SquadsService {
         date: c.commit?.author?.date,
         url: c.html_url,
       })),
+    };
+  }
+
+  /** Repo summary: stack (languages), contributors, code size, stars, forks, issues. */
+  async repoSummary(user: { id: string; role: UserRole }, squadId: string, repoId: string) {
+    await this.assertSquadMemberOrExec(user, squadId);
+    const r = await this.getRepoEntity(squadId, repoId);
+    const base = `/repos/${r.owner}/${r.repo}`;
+    const [info, langs, contributors] = await Promise.all([
+      this.gh(base, r.token) as Promise<any>,
+      this.gh(`${base}/languages`, r.token) as Promise<Record<string, number>>,
+      this.gh(`${base}/contributors?per_page=100`, r.token) as Promise<any[]>,
+    ]);
+
+    const totalBytes = Object.values(langs).reduce((a, b) => a + b, 0) || 1;
+    const stack = Object.entries(langs)
+      .sort((a, b) => b[1] - a[1])
+      .map(([language, bytes]) => ({
+        language,
+        bytes,
+        share: Math.round((bytes / totalBytes) * 1000) / 10,
+      }));
+
+    return {
+      repoId: r.id,
+      name: r.name,
+      repoUrl: r.repoUrl,
+      description: info.description,
+      stack,
+      codeSizeBytes: totalBytes,
+      stars: info.stargazers_count ?? 0,
+      forks: info.forks_count ?? 0,
+      openIssues: info.open_issues_count ?? 0,
+      defaultBranch: info.default_branch,
+      lastPushAt: info.pushed_at,
+      createdAt: info.created_at,
+      contributors: (Array.isArray(contributors) ? contributors : []).slice(0, 20).map((c: any) => ({
+        login: c.login,
+        contributions: c.contributions,
+        avatarUrl: c.avatar_url,
+        profileUrl: c.html_url,
+      })),
+      contributorCount: Array.isArray(contributors) ? contributors.length : 0,
     };
   }
 

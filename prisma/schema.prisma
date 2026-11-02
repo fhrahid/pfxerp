@@ -263,8 +263,6 @@ model Squad {
   id              String            @id @default(uuid())
   name            String            @unique
   description     String?
-  githubRepoUrl   String?           @db.Text
-  githubToken     String?           @db.Text
   isActive        Boolean           @default(true)
   healthStatus    SquadHealthStatus @default(STABLE)
   valuation       Decimal           @default(100000.00) @db.Decimal(14, 2)
@@ -289,6 +287,25 @@ model Squad {
   products                Product[]
   healthSnapshots         SquadHealthSnapshot[]
   sprintPayoutItems       SprintPayoutItem[]
+  repositories            SquadRepository[]
+}
+
+// v1.1: multiple GitHub repositories per squad (PM/C-level managed)
+model SquadRepository {
+  id        String   @id @default(uuid())
+  squadId   String
+  name      String            @db.VarChar(120) // display label
+  owner     String            @db.VarChar(120)
+  repo      String            @db.VarChar(120)
+  repoUrl   String   @db.Text
+  token     String?  @db.Text // optional PAT for private repos
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  squad     Squad    @relation(fields: [squadId], references: [id], onDelete: Cascade)
+
+  @@unique([squadId, owner, repo])
+  @@index([squadId])
 }
 
 model SquadMembership {
