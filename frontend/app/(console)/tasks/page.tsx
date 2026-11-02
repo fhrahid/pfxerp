@@ -100,14 +100,8 @@ export default function TasksPage() {
 }
 
 function TaskCard({ task: t }: { task: any }) {
-  const now = new Date();
-  const isDone = ["CTO_VERIFIED", "CLOSED"].includes(t.status);
-  const hasDue = Boolean(t.dueDate);
-  const isOverdue = hasDue && !isDone && new Date(t.dueDate) < now;
-  const isMissed = hasDue && isDone && (
-    (t.ctoVerifiedAt && new Date(t.ctoVerifiedAt) > new Date(t.dueDate)) ||
-    (t.flaggedCompleteAt && new Date(t.flaggedCompleteAt) > new Date(t.dueDate))
-  );
+  const isOverdue = t.isOverdue || (t.dueDate && new Date(t.dueDate) < new Date() && t.status !== "CLOSED");
+  const completedLate = Boolean(t.completedLate);
 
   return (
     <Dialog>
@@ -119,14 +113,15 @@ function TaskCard({ task: t }: { task: any }) {
               {t.priority}
             </Badge>
             {isOverdue ? (
-              <Badge variant="destructive" className="px-1.5 py-0 text-[10px]">
-                ⚠️ Overdue: {new Date(t.dueDate).toLocaleDateString()}
+              <Badge variant="destructive" className="px-1.5 py-0 text-[10px] font-bold">
+                MISSED DEADLINE
               </Badge>
-            ) : isMissed ? (
+            ) : completedLate ? (
               <Badge variant="destructive" className="px-1.5 py-0 text-[10px]">
-                Missed Deadline
+                Completed Late
               </Badge>
-            ) : hasDue ? (
+            ) : null}
+            {t.dueDate ? (
               <Badge variant="muted" className="px-1.5 py-0 text-[10px]">
                 Due: {new Date(t.dueDate).toLocaleDateString()}
               </Badge>
@@ -146,14 +141,12 @@ function TaskCard({ task: t }: { task: any }) {
 }
 
 function TaskDetail({ id }: { id: string }) {
-  const task = useQuery({ queryKey: ["task", id], queryFn: () => api("GET", `/tasks/${id}`) });
+  const task = useQuery({ queryKey: ["task", id], queryFn: () => api<any>("GET", `/tasks/${id}`) });
   if (task.isLoading) return <Skeleton className="h-40 w-full" />;
   const t = task.data;
-  const isOverdue = t.dueDate && !["CTO_VERIFIED", "CLOSED"].includes(t.status) && new Date(t.dueDate) < new Date();
-  const isMissed = t.dueDate && ["CTO_VERIFIED", "CLOSED"].includes(t.status) && (
-    (t.ctoVerifiedAt && new Date(t.ctoVerifiedAt) > new Date(t.dueDate)) ||
-    (t.flaggedCompleteAt && new Date(t.flaggedCompleteAt) > new Date(t.dueDate))
-  );
+  if (!t) return null;
+  const isOverdue = t.isOverdue || (t.dueDate && new Date(t.dueDate) < new Date() && t.status !== "CLOSED");
+  const completedLate = Boolean(t.completedLate);
 
   return (
     <div className="space-y-4">
@@ -161,20 +154,20 @@ function TaskDetail({ id }: { id: string }) {
         <Badge variant={statusVariant(t.status)}>{t.status}</Badge>
         <Badge variant={t.priority === "CRITICAL" ? "destructive" : "muted"}>{t.priority}</Badge>
         {isOverdue ? (
-          <Badge variant="destructive">⚠️ Overdue ({new Date(t.dueDate).toLocaleDateString()})</Badge>
-        ) : isMissed ? (
-          <Badge variant="destructive">Missed Deadline</Badge>
+          <Badge variant="destructive">⚠️ Overdue (Missed Deadline)</Badge>
+        ) : completedLate ? (
+          <Badge variant="destructive">Completed Late</Badge>
         ) : null}
       </div>
       {t.description ? <p className="text-sm text-muted-foreground">{t.description}</p> : null}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-sm">
         <Row label="Assignee" value={t.assignedTo?.fullName || "—"} />
-        <Row label="Squad" value={t.squad?.name} />
+        <Row label="Squad" value={t.squad?.name || "—"} />
         <Row label="PR / commit" value={t.gitPrUrl || t.gitCommitHash || "—"} mono />
         {t.dueDate ? (
           <Row
-            label="Deadline (Due Date)"
-            value={`${new Date(t.dueDate).toLocaleDateString()} ${isOverdue ? "— OVERDUE" : isMissed ? "— MISSED" : ""}`}
+            label="Due Date"
+            value={`${dt(t.dueDate)}${isOverdue ? " — Overdue (Missed Deadline)" : completedLate ? " — Completed Late" : ""}`}
           />
         ) : null}
         {t.pmFeedback ? <Row label="PM feedback" value={t.pmFeedback} /> : null}
@@ -249,8 +242,8 @@ function CreateTaskButton({ squadId }: { squadId: string }) {
         },
         {
           name: "dueDate",
-          label: "Due date (Deadline)",
-          type: "date",
+          label: "Due Date & Time",
+          type: "datetime-local",
         },
       ]}
       submitLabel="Create task"
@@ -261,7 +254,7 @@ function CreateTaskButton({ squadId }: { squadId: string }) {
           description: d.description,
           priority: d.priority,
           ...(d.assignedToId ? { assignedToId: d.assignedToId } : {}),
-          ...(d.dueDate ? { dueDate: new Date(d.dueDate).toISOString() } : {}),
+          dueDate: d.dueDate ? new Date(d.dueDate).toISOString() : undefined,
         })
       }
     />

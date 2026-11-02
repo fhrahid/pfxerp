@@ -28,7 +28,7 @@ import { cn } from "@/lib/utils";
 export interface FormField {
   name: string;
   label: string;
-  type?: "text" | "email" | "password" | "number" | "textarea" | "select" | "datetime" | "date" | "checkbox";
+  type?: "text" | "email" | "password" | "number" | "textarea" | "select" | "datetime" | "datetime-local" | "date" | "checkbox";
   options?: { value: string; label: string }[];
   value?: string | number | boolean;
   required?: boolean;
@@ -129,7 +129,7 @@ function FieldInput({ field: f }: { field: FormField }) {
     <Input
       id={id}
       name={f.name}
-      type={f.type === "datetime" ? "datetime-local" : f.type || "text"}
+      type={f.type === "datetime" || f.type === "datetime-local" ? "datetime-local" : f.type || "text"}
       required={f.required}
       placeholder={f.placeholder}
       defaultValue={f.value === undefined || f.value === null || typeof f.value === "boolean" ? "" : f.value}
