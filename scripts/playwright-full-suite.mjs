@@ -4,8 +4,10 @@ import fs from 'fs';
 import path from 'path';
 
 const prisma = new PrismaClient();
-const BASE_URL = 'http://localhost:3001';
-const SCREENSHOT_DIR = '/home/naim/.gemini/antigravity/brain/8c95619f-2c04-4099-ac68-76e7159b225e/scratch/playwright';
+const BASE_URL = process.env.BASE_URL || 'http://localhost:3001';
+const DEFAULT_ARTIFACT_DIR = '/home/naim/.gemini/antigravity/brain/8c95619f-2c04-4099-ac68-76e7159b225e/scratch/playwright';
+const SCREENSHOT_DIR = process.env.SCREENSHOT_DIR || 
+  (fs.existsSync(path.dirname(DEFAULT_ARTIFACT_DIR)) ? DEFAULT_ARTIFACT_DIR : path.join(process.cwd(), 'screenshots'));
 
 fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
@@ -45,8 +47,9 @@ async function runPlaywrightFullSuite() {
   await prisma.role.deleteMany({ where: { name: 'PLAYWRIGHT_AUDITOR' } });
   console.log('[Setup] Database ready.\n');
 
+  const chromePath = process.env.CHROME_PATH || (fs.existsSync('/usr/bin/google-chrome') ? '/usr/bin/google-chrome' : undefined);
   const browser = await chromium.launch({
-    executablePath: '/usr/bin/google-chrome',
+    ...(chromePath ? { executablePath: chromePath } : {}),
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
     headless: true,
   });
@@ -354,10 +357,14 @@ async function runPlaywrightFullSuite() {
     await page.screenshot({ path: path.join(SCREENSHOT_DIR, '20_quality_tab.png') });
 
   } catch (error) {
+    failCounter++;
     console.error('\n[Unhandled Test Error]:', error);
-    await page.screenshot({ path: path.join(SCREENSHOT_DIR, 'error_state.png') });
+    try {
+      if (page) await page.screenshot({ path: path.join(SCREENSHOT_DIR, 'error_state.png') });
+    } catch (_) {}
   } finally {
-    await browser.close();
+    if (browser) await browser.close();
+    await prisma.$disconnect();
   }
 
   console.log('\n========================================================================');

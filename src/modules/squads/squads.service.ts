@@ -168,6 +168,9 @@ export class SquadsService {
     if (res.status === 403 || res.status === 429) {
       throw new BadRequestException('GitHub API rate limit reached. Connect the repository with a Personal Access Token to raise the limit.');
     }
+    if (res.status === 204) {
+      return [];
+    }
     if (!res.ok) {
       const body = (await res.text()).slice(0, 160);
       throw new BadRequestException(`GitHub API ${res.status}: ${body}`);
@@ -192,9 +195,9 @@ export class SquadsService {
     const dup = await this.prisma.squadRepository.findUnique({
       where: { squadId_owner_repo: { squadId, owner: parsed.owner, repo: parsed.repo } },
     });
-    if (dup && dup.isActive) throw new AppException('CONFLICT', 'This repository is already connected to the squad');
+    if (dup) throw new AppException('CONFLICT', 'This repository is already connected to the squad');
 
-    return this.prisma.squadRepository.create({
+    const created = await this.prisma.squadRepository.create({
       data: {
         squadId,
         name: dto.name?.trim() || `${parsed.owner}/${parsed.repo}`,
@@ -204,6 +207,17 @@ export class SquadsService {
         token: dto.token?.trim() || null,
       },
     });
+
+    return {
+      id: created.id,
+      squadId: created.squadId,
+      name: created.name,
+      owner: created.owner,
+      repo: created.repo,
+      repoUrl: created.repoUrl,
+      hasToken: Boolean(created.token),
+      createdAt: created.createdAt,
+    };
   }
 
   async removeRepo(user: { id: string; role: string }, squadId: string, repoId: string) {

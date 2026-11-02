@@ -32,8 +32,8 @@ export function TaskActions({ task: t, onChanged }: { task: any; onChanged?: () 
           title="Flag complete — git proof required"
           description="The PM gate opens once you attach a PR or commit."
           fields={[
-            { name: "gitPrUrl", label: "Pull request URL", value: `https://github.com/pointfex/squad-x/pull/${Math.floor(Math.random() * 90 + 10)}` },
-            { name: "gitCommitHash", label: "Commit hash", value: Array.from({ length: 40 }, () => "0123456789abcdef"[Math.floor(Math.random() * 16)]).join(""), hint: "mono" },
+            { name: "gitPrUrl", label: "Pull request URL", placeholder: "https://github.com/pointfex/squad-repo/pull/1" },
+            { name: "gitCommitHash", label: "Commit hash", placeholder: "40-character SHA-1 commit hash", hint: "mono" },
           ]}
           submitLabel="Flag complete"
           onSubmit={(d) => run("POST", `/tasks/${t.id}/flag-complete`, d)}
