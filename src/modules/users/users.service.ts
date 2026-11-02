@@ -45,9 +45,11 @@ export class UsersService {
   async createUser(dto: CreateUserDto) {
     const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
     if (existing) throw new AppException('CONFLICT', `A user with email ${dto.email} already exists`);
-    if (dto.studentId) {
-      const clash = await this.prisma.user.findUnique({ where: { studentId: dto.studentId } });
-      if (clash) throw new AppException('CONFLICT', `Student ID ${dto.studentId} is already taken`);
+    // Blank student IDs become NULL — Postgres UNIQUE allows many NULLs but only one ''
+    const studentId = dto.studentId?.trim() || null;
+    if (studentId) {
+      const clash = await this.prisma.user.findUnique({ where: { studentId } });
+      if (clash) throw new AppException('CONFLICT', `Student ID ${studentId} is already taken`);
     }
 
     const passwordHash = await bcrypt.hash(dto.password, 12);
@@ -57,7 +59,7 @@ export class UsersService {
         fullName: dto.fullName,
         passwordHash,
         role: dto.role,
-        studentId: dto.studentId ?? null,
+        studentId,
         isActive: true,
       },
     });
@@ -74,13 +76,16 @@ export class UsersService {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
 
+    // Blank student IDs become NULL — Postgres UNIQUE allows many NULLs but only one ''
+    const studentId = dto.studentId === undefined ? undefined : dto.studentId?.trim() || null;
+
     if (dto.email && dto.email !== user.email) {
       const clash = await this.prisma.user.findUnique({ where: { email: dto.email } });
       if (clash) throw new AppException('CONFLICT', `A user with email ${dto.email} already exists`);
     }
-    if (dto.studentId && dto.studentId !== user.studentId) {
-      const clash = await this.prisma.user.findUnique({ where: { studentId: dto.studentId } });
-      if (clash) throw new AppException('CONFLICT', `Student ID ${dto.studentId} is already taken`);
+    if (studentId && studentId !== user.studentId) {
+      const clash = await this.prisma.user.findUnique({ where: { studentId } });
+      if (clash) throw new AppException('CONFLICT', `Student ID ${studentId} is already taken`);
     }
 
     const updated = await this.prisma.user.update({
@@ -89,7 +94,7 @@ export class UsersService {
         ...(dto.fullName ? { fullName: dto.fullName } : {}),
         ...(dto.email ? { email: dto.email } : {}),
         ...(dto.role ? { role: dto.role } : {}),
-        ...(dto.studentId !== undefined ? { studentId: dto.studentId } : {}),
+        ...(studentId !== undefined ? { studentId } : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
         ...(dto.password ? { passwordHash: await bcrypt.hash(dto.password, 12) } : {}),
         // password change or deactivation invalidates all refresh sessions

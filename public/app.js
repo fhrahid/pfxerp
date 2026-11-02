@@ -501,7 +501,7 @@ function uiUserCreate() {
     { name: 'password', label: 'Temporary password (min 8 chars)', required: true, value: 'Pointfex-' + Math.random().toString(36).slice(2, 8) },
     { name: 'role', label: 'Role', type: 'select', options: ['DEVELOPER', 'PM', 'CFO', 'CTO', 'CPO', 'CEO'].map((r) => ({ value: r, label: r })) },
     { name: 'studentId', label: 'Student ID (optional)', placeholder: 'CSE034' },
-  ], 'Create profile', (d) => api('POST', '/users', d));
+  ], 'Create profile', (d) => api('POST', '/users', { ...d, studentId: d.studentId || undefined }));
 }
 
 function uiUserEdit(id, fullName, email, role, studentId) {

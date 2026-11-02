@@ -878,6 +878,18 @@ await test('BR: developer tiers removed — API no longer exposes them', async (
   assert(cols === '', 'User.tier column still exists in database');
 });
 
+await test('CRUD REGRESSION: blank Student ID — multiple users without student IDs', async () => {
+  // Production bug: blank ID was saved as '' and Postgres UNIQUE allows only one '' (many NULLs are fine)
+  const a = await api(cpo.token, 'POST', '/users', { email: 'blank1@pointfex.dev', fullName: 'Blank One', password: 'Pointfex-111', role: 'DEVELOPER' });
+  const b = await api(cpo.token, 'POST', '/users', { email: 'blank2@pointfex.dev', fullName: 'Blank Two', password: 'Pointfex-222', role: 'PM', studentId: '   ' });
+  const stored = dbq(`SELECT COUNT(*) FROM "User" WHERE email IN ('blank1@pointfex.dev','blank2@pointfex.dev') AND "studentId" IS NULL`);
+  assert(stored === '2', `blank studentIds not stored as NULL (${stored})`);
+  // and clearing an existing ID via update also stores NULL
+  await api(cpo.token, 'PATCH', `/users/${a.id}`, { studentId: '' });
+  const cleared = dbq(`SELECT "studentId" FROM "User" WHERE id='${a.id}'`);
+  assert(cleared === '', 'empty update did not NULL the column');
+});
+
 /* ============================================================= GLOBAL INVARIANTS */
 section('GLOBAL INVARIANTS');
 await test('Double-entry conservation: Σ all account balances == seeded ৳5,600,000', async () => {
