@@ -32,6 +32,9 @@ services:
       INITIAL_CEO_EMAIL: ${INITIAL_CEO_EMAIL:-noor@seu.edu.bd}
       INITIAL_CEO_PASSWORD: ${INITIAL_CEO_PASSWORD:-PointfexCeo2026!}
       ALLOWED_EMAIL_DOMAIN: ${ALLOWED_EMAIL_DOMAIN:-seu.edu.bd}
+      CLIENT_URL: ${CLIENT_URL:-http://localhost:3000}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM_EMAIL: "${RESEND_FROM_EMAIL:-Pointfex ERP <cpo@pointfex.com>}"
       NODE_ENV: production
     ports:
       - "3000:3000"

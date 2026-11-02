@@ -39,7 +39,10 @@ export class MailService {
 
   constructor() {
     const apiKey = process.env.RESEND_API_KEY?.trim();
-    this.fromEmail = process.env.RESEND_FROM_EMAIL?.trim() || 'Pointfex ERP <onboarding@resend.dev>';
+    // A verified Pointfex domain is required by Resend to deliver to recipients
+    // other than the Resend account owner. Never default production mail to the
+    // Resend testing sender.
+    this.fromEmail = process.env.RESEND_FROM_EMAIL?.trim() || 'Pointfex ERP <cpo@pointfex.com>';
 
     if (apiKey && apiKey.startsWith('re_')) {
       this.resend = new Resend(apiKey);
