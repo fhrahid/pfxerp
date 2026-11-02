@@ -10,7 +10,7 @@ import { AuditService } from './audit.service';
 export class ExecutiveAuditController {
   constructor(private readonly audit: AuditService) {}
 
-  @Get('logs')
+  @Get(['logs', 'executive-logs'])
   @Roles(UserRole.CEO, UserRole.CFO, UserRole.CTO, UserRole.CPO)
   listLogs(
     @Query('page') page = '1',

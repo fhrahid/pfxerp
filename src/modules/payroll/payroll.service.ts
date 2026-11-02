@@ -162,6 +162,23 @@ export class PayrollService {
       data: { status: 'APPROVED', approvedById: cpoUserId },
     });
 
+    await this.prisma.executiveAuditLog.create({
+      data: {
+        executiveId: cpoUserId,
+        executiveRole: 'CPO',
+        actionType: 'APPROVE_PAYROLL',
+        payloadSnapshot: {
+          proposalId,
+          squadId: proposal.squadId,
+          squadName: proposal.squad.name,
+          labNumber: proposal.labNumber,
+          totalDisbursed: total,
+          recipientsCount: paidItems.length,
+        },
+        riskSeverity: 'INFO',
+      },
+    }).catch(() => {});
+
     this.events.emitToRoom(this.events.squadRoom(proposal.squadId), 'payroll:executed', {
       proposalId: proposal.id,
       labNumber: proposal.labNumber,
@@ -230,6 +247,21 @@ export class PayrollService {
       update: { dpiScore: 0 },
       create: { userId: dto.targetUserId, sprintNumber: sprint, dpiScore: 0 },
     });
+
+    await this.prisma.executiveAuditLog.create({
+      data: {
+        executiveId: cpoUserId,
+        executiveRole: 'CPO',
+        actionType: 'ISSUE_SLACKER_FINE',
+        payloadSnapshot: {
+          targetUserId: dto.targetUserId,
+          targetSquadId: dto.targetSquadId,
+          fineAmount: fine,
+          reason: dto.reason,
+        },
+        riskSeverity: 'WARNING',
+      },
+    }).catch(() => {});
 
     return {
       fineAmount: fine,

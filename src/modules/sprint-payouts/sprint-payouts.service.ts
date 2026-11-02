@@ -86,10 +86,22 @@ export class SprintPayoutsService {
     const payout = await this.prisma.sprintPayout.findUnique({ where: { id: payoutId } });
     if (!payout) throw new NotFoundException('Payout not found');
     if (payout.status !== 'PROPOSED') throw new AppException('CONFLICT', `Payout is ${payout.status}`);
-    return this.prisma.sprintPayout.update({
+    const approved = await this.prisma.sprintPayout.update({
       where: { id: payoutId },
       data: { status: 'APPROVED', approvedById: ceoUserId },
     });
+
+    await this.prisma.executiveAuditLog.create({
+      data: {
+        executiveId: ceoUserId,
+        executiveRole: 'CEO',
+        actionType: 'APPROVE_SPRINT_PAYOUT',
+        payloadSnapshot: { payoutId, sprintNumber: payout.sprintNumber },
+        riskSeverity: 'WARNING',
+      },
+    }).catch(() => {});
+
+    return approved;
   }
 
   /** Executes the full waterfall atomically per squad. */
@@ -160,6 +172,21 @@ export class SprintPayoutsService {
       where: { id: payoutId },
       data: { status: 'EXECUTED', executedAt: new Date() },
     });
+
+    await this.prisma.executiveAuditLog.create({
+      data: {
+        executiveId: cfoUserId,
+        executiveRole: 'CFO',
+        actionType: 'EXECUTE_SPRINT_PAYOUT',
+        payloadSnapshot: {
+          payoutId,
+          sprintNumber: updated.sprintNumber,
+          totalPoolDisbursed: payout.items.reduce((a, i) => a + Number(i.grossAmount), 0),
+          cfoTaxCollected,
+        },
+        riskSeverity: 'WARNING',
+      },
+    }).catch(() => {});
 
     return {
       sprintNumber: updated.sprintNumber,

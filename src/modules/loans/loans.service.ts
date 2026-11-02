@@ -115,7 +115,7 @@ export class LoansService {
       authorizedById: cfoUserId,
     });
 
-    return this.prisma.loan.update({
+    const updatedLoan = await this.prisma.loan.update({
       where: { id: loanId },
       data: {
         disbursedAt: new Date(),
@@ -123,6 +123,24 @@ export class LoansService {
         approvedById: cfoUserId,
       },
     });
+
+    await this.prisma.executiveAuditLog.create({
+      data: {
+        executiveId: cfoUserId,
+        executiveRole: 'CFO',
+        actionType: 'DISBURSE_EMERGENCY_LOAN',
+        payloadSnapshot: {
+          loanId,
+          borrowerSquadId: loan.borrowerSquadId,
+          squadName: loan.borrowerSquad.name,
+          principalAmount: Number(loan.principalAmount),
+          totalDue: Number(loan.totalDue),
+        },
+        riskSeverity: 'WARNING',
+      },
+    }).catch(() => {});
+
+    return updatedLoan;
   }
 
   /** PM repays: principal -> SYSTEM_RESERVE, interest -> CFO wallet (BR-CFO-10). */

@@ -96,11 +96,29 @@ export class UsersController {
     return this.usersService.createUser(dto, caller);
   }
 
-  /** Developers/PMs may only fetch themselves; executives may fetch anyone. */
+  /** Profile view: Developers may fetch themselves; PMs can fetch themselves and members in their squads; executives may fetch anyone. */
+  @Get(':id/profile')
   @Get(':id')
   async findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     if (!isExecRole(user.role) && user.id !== id) {
-      throw new ForbiddenException('AUTHZ_NOT_OWNER');
+      if (user.role === 'PM') {
+        const sharedSquad = await this.prisma.squadMembership.findFirst({
+          where: {
+            userId: id,
+            leftAt: null,
+            squad: {
+              memberships: {
+                some: { userId: user.id, role: 'PM', leftAt: null },
+              },
+            },
+          },
+        });
+        if (!sharedSquad) {
+          throw new ForbiddenException('AUTHZ_NOT_SQUAD_MEMBER');
+        }
+      } else {
+        throw new ForbiddenException('AUTHZ_NOT_OWNER');
+      }
     }
     return this.usersService.getUserProfile(id);
   }

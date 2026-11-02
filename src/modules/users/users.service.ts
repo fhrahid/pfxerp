@@ -314,6 +314,127 @@ export class UsersService {
     const latestPmhi = pmhiSnapshots[0]?.pmhiScore ? Number(pmhiSnapshots[0].pmhiScore) : null;
     const onTimeRate = completedTasks > 0 ? Math.round((onTimeDeliveryCount / completedTasks) * 100) : 100;
 
+    // Role-specific metrics for PMs, Developers, and C-Level Executives
+    let executiveAuditLogs: any[] = [];
+    let executiveDetails: any = null;
+    let slackerFines: any[] = [];
+    let pmDetails: any = null;
+
+    if (user.role === 'DEVELOPER') {
+      slackerFines = await this.prisma.ledgerTransaction.findMany({
+        where: { referenceType: 'SLACKER_FINE', referenceId: userId },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+        select: { id: true, description: true, createdAt: true },
+      });
+    }
+
+    if (user.role === 'PM') {
+      const [pmVerifiedTasks, pmPayrolls] = await Promise.all([
+        this.prisma.task.findMany({
+          where: { pmVerifiedById: userId },
+          select: { id: true, title: true, pmIsFlagPremature: true, pmPenaltyPoints: true, pmVerifiedAt: true },
+          orderBy: { pmVerifiedAt: 'desc' },
+          take: 50,
+        }),
+        this.prisma.payrollProposal.findMany({
+          where: { submittedById: userId },
+          select: { id: true, labNumber: true, totalProposed: true, status: true, createdAt: true },
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+        }),
+      ]);
+      pmDetails = {
+        verifiedCount: pmVerifiedTasks.filter((t) => !t.pmIsFlagPremature).length,
+        rejectedCount: pmVerifiedTasks.filter((t) => t.pmIsFlagPremature).length,
+        recentVerifications: pmVerifiedTasks.slice(0, 10),
+        payrollsSubmitted: pmPayrolls,
+      };
+    }
+
+    if (['CFO', 'CTO', 'CPO', 'CEO'].includes(user.role)) {
+      executiveAuditLogs = await this.prisma.executiveAuditLog.findMany({
+        where: { executiveId: userId },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+      });
+
+      if (user.role === 'CFO') {
+        const [loans, payouts, equity] = await Promise.all([
+          this.prisma.loan.findMany({
+            where: { approvedById: userId },
+            include: { borrowerSquad: { select: { id: true, name: true } } },
+            orderBy: { createdAt: 'desc' },
+            take: 15,
+          }),
+          this.prisma.sprintPayout.findMany({
+            where: { proposedById: userId },
+            orderBy: { createdAt: 'desc' },
+            take: 10,
+          }),
+          this.prisma.equityStake.findMany({
+            where: { investorId: userId },
+            include: { squad: { select: { id: true, name: true } } },
+            take: 10,
+          }),
+        ]);
+        executiveDetails = {
+          loansApproved: loans,
+          sprintPayouts: payouts,
+          equityHoldings: equity,
+        };
+      } else if (user.role === 'CTO') {
+        const [citationsIssued, reviewsCount, consultancies] = await Promise.all([
+          this.prisma.codeAuditCitation.findMany({
+            where: { citedById: userId },
+            include: { squad: { select: { id: true, name: true } } },
+            orderBy: { createdAt: 'desc' },
+            take: 20,
+          }),
+          this.prisma.task.count({ where: { ctoVerifiedById: userId } }),
+          this.prisma.consultancyBooking.findMany({
+            where: { consultantId: userId },
+            include: { clientSquad: { select: { id: true, name: true } } },
+            orderBy: { createdAt: 'desc' },
+            take: 15,
+          }),
+        ]);
+        executiveDetails = {
+          citationsIssued,
+          tasksReviewedCount: reviewsCount,
+          consultancies,
+        };
+      } else if (user.role === 'CPO') {
+        const [approvedPayrolls, noticesDispatched] = await Promise.all([
+          this.prisma.payrollProposal.findMany({
+            where: { approvedById: userId },
+            include: { squad: { select: { id: true, name: true } } },
+            orderBy: { updatedAt: 'desc' },
+            take: 15,
+          }),
+          this.prisma.notice.findMany({
+            where: { senderId: userId },
+            include: { recipient: { select: { id: true, fullName: true, role: true } } },
+            orderBy: { createdAt: 'desc' },
+            take: 20,
+          }),
+        ]);
+        executiveDetails = {
+          approvedPayrolls,
+          noticesDispatched,
+        };
+      } else if (user.role === 'CEO') {
+        const chaos = await this.prisma.chaosEvent.findMany({
+          where: { triggeredById: userId },
+          orderBy: { createdAt: 'desc' },
+          take: 15,
+        });
+        executiveDetails = {
+          chaosEvents: chaos,
+        };
+      }
+    }
+
     return {
       ...this.safe(user),
       createdAt: user.createdAt,
@@ -337,6 +458,10 @@ export class UsersService {
       dpiSnapshots,
       pmhiSnapshots,
       citations,
+      slackerFines,
+      pmDetails,
+      executiveDetails,
+      executiveAuditLogs,
     };
   }
 }
