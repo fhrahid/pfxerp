@@ -16,17 +16,11 @@ import '../src/env';
 import { PrismaClient, AccountType, UserRole, SquadRole, CertificationType } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { randomBytes } from 'crypto';
-import { E2EEUtil } from '../src/common/crypto/e2ee.util';
 
 const prisma = new PrismaClient();
 
 async function upsertUser(data: { email: string; fullName: string; role: UserRole | string; studentId?: string; password: string }) {
   const passwordHash = await bcrypt.hash(data.password, 12);
-  const keys = E2EEUtil.generateUserKeys();
-  const publicKey = JSON.stringify({
-    ed25519: keys.signing.publicKey,
-    x25519: keys.exchange.publicKey,
-  });
   const user = await prisma.user.upsert({
     where: { email: data.email },
     update: {},
@@ -36,7 +30,6 @@ async function upsertUser(data: { email: string; fullName: string; role: UserRol
       fullName: data.fullName,
       role: data.role,
       studentId: data.studentId ?? null,
-      publicKey,
       isActive: true,
     },
   });

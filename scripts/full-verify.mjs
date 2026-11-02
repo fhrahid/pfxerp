@@ -307,16 +307,17 @@ await test('BR-CTO-11..14: CTO reject → squad fine 2000 (1000 CTO + 1000 reser
   await api(d11.token, 'POST', `/tasks/${t.id}/start`);
   await api(d11.token, 'POST', `/tasks/${t.id}/flag-complete`, { gitPrUrl: 'https://github.com/pointfex/squad-1/pull/102' });
   await api(pm1.token, 'POST', `/tasks/${t.id}/pm-verify`, { comment: 'ok' });
-  const b = { s1: treasury(1), cto: wallet('cto@seu.edu.bd'), r: reserve() };
+  taskD = t;
+  const b = { s1: treasury(1), cto: wallet('cto@seu.edu.bd'), cfo: wallet('cfo@seu.edu.bd'), r: reserve() };
   const r = await api(cto.token, 'POST', `/tasks/${t.id}/cto-reject`, { critique: 'Trivial mocks; controllers leak business logic badly.', citationType: 'BAD_MERGE_REQUEST' });
   assert(r.status === 'IN_PROGRESS', 'cto-reject failed');
   eq(treasury(1), b.s1 - 2000, 'squad fine debit');
   eq(wallet('cto@seu.edu.bd'), b.cto + 1000, 'CTO cut');
-  eq(reserve(), b.r + 1000, 'reserve cut');
+  eq(wallet('cfo@seu.edu.bd'), b.cfo + 400, 'CFO cut');
+  eq(reserve(), b.r + 600, 'reserve cut');
   const pmhi = dbNum(`SELECT "pmhiScore" FROM "PmPerformanceSnapshot" WHERE "userId"='${userId('pm1@seu.edu.bd')}'`);
   const ov = dbNum(`SELECT "ctoOverrideCount" FROM "PmPerformanceSnapshot" WHERE "userId"='${userId('pm1@seu.edu.bd')}'`);
   assert(ov >= 1 && pmhi <= 95, `PMHI=${pmhi}, overrides=${ov}`);
-  taskD = t;
 });
 await test('pm.md §9.1: isolation — PM cannot flag own task; developer cannot PM-verify', async () => {
   const t = await api(pm1.token, 'POST', '/tasks', { squadId: squadId(1), title: 'PM self task', storyPoints: 2, sprintNumber: 1, assignedToId: userId('pm1@seu.edu.bd') });
@@ -842,9 +843,9 @@ await test('BR §5 health: Squad 6 flagged BANKRUPT_RISK after default', async (
   assert(health === 'BANKRUPT_RISK', `got ${health}`);
 });
 await test('BR-CFO-11: BANKRUPT_RISK locks marketplace purchases and consultancy bookings', async () => {
-  const listings = await api(pm6.token, 'GET', '/marketplace/listings');
+  const listings = await api(pm6.token, 'GET', '/cto/marketplace/listings');
   if (listings.length > 0) {
-    await expectStatus(pm6.token, 'POST', `/marketplace/listings/${listings[0].id}/purchase`, { buyerSquadId: squadId(6) }, 403, 'bankrupt marketplace purchase');
+    await expectStatus(pm6.token, 'POST', `/cto/marketplace/listings/${listings[0].id}/purchase`, { buyerSquadId: squadId(6) }, 403, 'bankrupt marketplace purchase');
   }
   const consultant = userId('cto@seu.edu.bd');
   await expectStatus(pm6.token, 'POST', '/cto/consultancy/bookings', { consultantId: consultant, clientSquadId: squadId(6), scheduledAt: new Date(Date.now() + 86400000).toISOString() }, 403, 'bankrupt consultancy booking');

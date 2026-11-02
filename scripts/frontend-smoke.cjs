@@ -8,6 +8,7 @@ const code = fs.readFileSync('public/app.js', 'utf8');
 /* ---------- stubs ---------- */
 const elements = new Map();
 function makeEl(id) {
+  const classes = new Set();
   return {
     id,
     _html: '',
@@ -18,7 +19,11 @@ function makeEl(id) {
     value: '',
     checked: false,
     children: [],
-    classList: { add() {}, remove() {} },
+    classList: {
+      add: (...names) => names.forEach((name) => classes.add(name)),
+      remove: (...names) => names.forEach((name) => classes.delete(name)),
+      contains: (name) => classes.has(name),
+    },
     appendChild() {}, remove() {},
     setAttribute() {}, addEventListener() {},
     querySelectorAll: () => [],

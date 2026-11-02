@@ -117,7 +117,7 @@ Three end-to-end suites ship in `scripts/` (run against a freshly seeded DB):
 # Destructive: use only with a disposable local verification database.
 docker compose exec api npx prisma migrate reset --force --skip-seed
 docker compose exec api node dist/prisma/seed.js
-node scripts/full-verify.mjs          # 90/90 checks incl. exact ledger math, chain tamper detection, conservation
+node scripts/full-verify.mjs          # 110 checks incl. exact ledger math, chain tamper detection, conservation
 
 # 2. realistic sprint narrative through every module
 node scripts/company-flow.mjs
@@ -126,7 +126,7 @@ node scripts/company-flow.mjs
 node scripts/frontend-smoke.cjs
 ```
 
-Last run: **90/90 rules passed** (all calculations verified to the taka against the database, money supply conserved at ৳5,600,000, HMAC chain VALID). See `DEPLOY.md` for the Dokploy VPS guide.
+Last run: **110/110 rules passed** (all calculations verified to the taka against the database, money supply conserved at ৳5,600,000, HMAC chain VALID). See `DEPLOY.md` for the Dokploy VPS guide.
 
 ---
 
