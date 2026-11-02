@@ -116,10 +116,43 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const sprint = useSprint();
   const role = me.data?.role || "";
   const [mobileOpen, setMobileOpen] = React.useState(false);
+  const menuButton = React.useRef<HTMLButtonElement>(null);
+  const closeButton = React.useRef<HTMLButtonElement>(null);
+  const mobileNavigation = React.useRef<HTMLElement>(null);
 
   React.useEffect(() => {
     setMobileOpen(false);
   }, [pathname]);
+
+  React.useEffect(() => {
+    if (!mobileOpen) return;
+    closeButton.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMobileOpen(false);
+        menuButton.current?.focus();
+      } else if (event.key === "Tab") {
+        const controls = mobileNavigation.current?.querySelectorAll<HTMLElement>("a[href], button:not([disabled])");
+        if (!controls?.length) return;
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [mobileOpen]);
+
+  const closeMenu = () => {
+    setMobileOpen(false);
+    menuButton.current?.focus();
+  };
 
   const items = NAV.filter((n) => !n.roles || n.roles.includes(role));
   const initials = (me.data?.fullName || "?")
@@ -157,17 +190,23 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-h-screen">
+      <a href="#main-content" className="skip-link">Skip to main content</a>
       {/* Mobile Drawer Backdrop */}
       {mobileOpen && (
         <div
           className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs md:hidden"
-          onClick={() => setMobileOpen(false)}
+          onClick={closeMenu}
           aria-hidden="true"
         />
       )}
 
       {/* Mobile Drawer */}
       <aside
+        ref={mobileNavigation}
+        id="mobile-navigation"
+        aria-label="Mobile navigation"
+        aria-hidden={!mobileOpen}
+        style={{ visibility: mobileOpen ? "visible" : "hidden" }}
         className={cn(
           "fixed inset-y-0 left-0 z-50 flex w-72 max-w-[85vw] flex-col border-r bg-card shadow-2xl transition-transform duration-200 ease-in-out md:hidden",
           mobileOpen ? "translate-x-0" : "-translate-x-full",
@@ -186,10 +225,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
             </div>
           </div>
           <Button
+            ref={closeButton}
             variant="ghost"
             size="icon"
-            className="h-8 w-8 text-muted-foreground"
-            onClick={() => setMobileOpen(false)}
+            className="text-muted-foreground"
+            onClick={closeMenu}
             aria-label="Close menu"
           >
             <X className="h-4 w-4" />
@@ -205,9 +245,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
                 href={item.href}
                 onClick={() => setMobileOpen(false)}
                 className={cn(
-                  "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                  "flex min-h-11 items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors",
                   active ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground",
                 )}
+                aria-current={active ? "page" : undefined}
+                tabIndex={mobileOpen ? 0 : -1}
               >
                 <Icon className="h-4 w-4" />
                 {item.label}
@@ -243,6 +285,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
                   "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors",
                   active ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground",
                 )}
+                aria-current={active ? "page" : undefined}
               >
                 <Icon className="h-4 w-4" />
                 {item.label}
@@ -258,11 +301,14 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <header className="sticky top-0 z-40 flex h-16 items-center justify-between gap-2.5 border-b bg-background/90 px-3.5 sm:px-6 backdrop-blur">
           <div className="flex items-center gap-2.5 min-w-0">
             <Button
+              ref={menuButton}
               variant="ghost"
               size="icon"
-              className="h-9 w-9 shrink-0 md:hidden text-foreground"
+              className="shrink-0 md:hidden text-foreground"
               onClick={() => setMobileOpen(true)}
               aria-label="Open navigation menu"
+              aria-expanded={mobileOpen}
+              aria-controls="mobile-navigation"
             >
               <Menu className="h-5 w-5" />
             </Button>
@@ -290,7 +336,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             )}
           </div>
         </header>
-        <main className="flex-1 p-3.5 sm:p-6 min-w-0">{children}</main>
+        <main id="main-content" tabIndex={-1} className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8">{children}</main>
       </div>
     </div>
   );

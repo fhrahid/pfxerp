@@ -13,10 +13,12 @@ import { Label } from "@/components/ui/label";
 export default function LoginPage() {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState("");
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const data = new FormData(e.currentTarget);
+    setError("");
     setBusy(true);
     try {
       const user = await login(String(data.get("email")), String(data.get("password")));
@@ -24,7 +26,7 @@ export default function LoginPage() {
       router.push("/overview");
       router.refresh();
     } catch (err) {
-      toast.error((err as Error).message || "Sign-in failed");
+      setError((err as Error).message || "Sign-in failed");
     } finally {
       setBusy(false);
     }
@@ -51,13 +53,14 @@ export default function LoginPage() {
           </CardHeader>
           <CardContent>
             <form onSubmit={onSubmit} className="grid gap-4">
+              {error && <p id="sign-in-error" role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</p>}
               <div className="grid gap-2">
                 <Label htmlFor="email">Email</Label>
-                <Input id="email" name="email" type="email" required placeholder="you@pointfex.com" autoComplete="username" />
+                <Input id="email" name="email" type="email" required placeholder="you@pointfex.com" autoComplete="username" aria-describedby={error ? "sign-in-error" : undefined} />
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="password">Password</Label>
-                <Input id="password" name="password" type="password" required autoComplete="current-password" />
+                <Input id="password" name="password" type="password" required autoComplete="current-password" aria-describedby={error ? "sign-in-error" : undefined} />
               </div>
               <Button type="submit" className="mt-1 gap-2" disabled={busy}>
                 <Rocket className="h-4 w-4" />
