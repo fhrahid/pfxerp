@@ -727,7 +727,9 @@ const uiCreateTask = uiTaskCreate;
 
 async function uiTaskDetail(id) {
   const t = await api('GET', '/tasks/' + id);
-  const canStart = t.status === 'TODO';
+  // Match the API: assignees can start their work; squad leadership may start
+  // work on behalf of a squad. Do not present a button that the API rejects.
+  const canStart = t.status === 'TODO' && (t.assignedToId === S.user.id || isPM() || isCPO() || isCTO() || isCEO());
   const canFlag = t.status === 'IN_PROGRESS' && t.assignedToId === S.user.id;
   const canPm = t.status === 'FLAGGED_COMPLETE' && (isPM() || isCPO() || isCTO());
   const canCto = t.status === 'PM_VERIFIED' && isCTO();

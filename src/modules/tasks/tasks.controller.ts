@@ -160,8 +160,11 @@ export class TasksController {
   }
 
   @Post(':id/flag-complete')
-  @Roles(UserRole.DEVELOPER)
   flagComplete(@Param('id') id: string, @Body() dto: FlagCompleteDto, @CurrentUser() user: AuthUser) {
+    // Authorization is assignment-based in TasksService: any authenticated
+    // assignee may submit their own work, regardless of their organisation role.
+    // Restricting this route to DEVELOPER made valid PM/C-level/custom-role
+    // assignees unable to complete their tasks.
     return this.tasks.flagComplete(user, id, dto);
   }
 

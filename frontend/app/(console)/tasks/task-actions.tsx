@@ -12,6 +12,7 @@ export function TaskActions({ task: t, onChanged }: { task: any; onChanged?: () 
   const action = useAction();
   const role = me.data?.role || "";
   const isAssignee = t.assignedToId === me.data?.id;
+  const canStart = isAssignee || ["PM", "CEO", "CTO", "CPO"].includes(role);
 
   const run = async (method: string, path: string, body?: unknown, idem?: boolean) => {
     await action(method, path, body, idem);
@@ -20,7 +21,7 @@ export function TaskActions({ task: t, onChanged }: { task: any; onChanged?: () 
 
   return (
     <div className="flex flex-wrap gap-2">
-      {t.status === "TODO" ? (
+      {t.status === "TODO" && canStart ? (
         <Button size="sm" onClick={() => run("POST", `/tasks/${t.id}/start`)}>
           Start work
         </Button>
