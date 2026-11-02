@@ -346,7 +346,7 @@ function GitModal({ squadId, name, onClose }: { squadId: string; name: string; o
             ) : null}
           </div>
         )}
-        {canManage ? (
+        {!canManage ? (
           <div className="mt-4 text-sm text-muted-foreground">
             Only the squad PM and C-level can connect or remove repositories.
           </div>

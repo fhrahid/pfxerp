@@ -102,19 +102,7 @@ export class UsersController {
     if (!isExecRole(user.role) && user.id !== id) {
       throw new ForbiddenException('AUTHZ_NOT_OWNER');
     }
-    const target = await this.prisma.user.findUnique({
-      where: { id },
-      select: {
-        id: true,
-        email: true,
-        fullName: true,
-        role: true,
-        isActive: true,
-        squadMemberships: { where: { leftAt: null }, select: { squad: { select: { id: true, name: true } }, role: true, allocation: true } },
-      },
-    });
-    if (!target) throw new ForbiddenException('NOT_FOUND');
-    return target;
+    return this.usersService.getUserProfile(id);
   }
 
   /** CPO/CEO: update a profile (rename, role change, password reset, deactivate). */

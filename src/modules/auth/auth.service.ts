@@ -74,6 +74,21 @@ export class AuthService {
       squadIds: user.squadMemberships.map((m) => m.squadId),
     });
 
+    try {
+      const roleForAudit = (Object.values(UserRole).includes(user.role as any) ? user.role : 'DEVELOPER') as UserRole;
+      await this.prisma.executiveAuditLog.create({
+        data: {
+          executiveId: user.id,
+          executiveRole: roleForAudit,
+          actionType: 'USER_LOGIN',
+          riskSeverity: 'INFO',
+          payloadSnapshot: { email: user.email, timestamp: new Date().toISOString() },
+        },
+      });
+    } catch {
+      // Non-blocking login audit
+    }
+
     return {
       ...tokens,
       user: {

@@ -37,6 +37,12 @@ class TriggerChaosDto {
   timeLimitSeconds?: number;
 }
 
+class ResolveChaosDto {
+  @IsString()
+  @MinLength(5)
+  resolution: string;
+}
+
 @ApiTags('chaos')
 @ApiBearerAuth()
 @Controller('chaos')
@@ -56,9 +62,10 @@ export class ChaosController {
   }
 
   @Post('events/:id/resolve')
+  @Roles(UserRole.CEO, UserRole.PM)
   resolve(
     @Param('id') id: string,
-    @Body() body: { resolution: string },
+    @Body() body: ResolveChaosDto,
     @CurrentUser() user: AuthUser,
   ) {
     return this.chaos.resolve(user, id, body.resolution);

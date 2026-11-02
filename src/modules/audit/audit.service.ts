@@ -164,4 +164,53 @@ export class AuditService {
 
     return { citationId, penaltyAmount: amount, transactionId: tx.id, creditedTo: 'SYSTEM_RESERVE', cfoCut };
   }
+
+  /** Query executive audit logs (with filters and pagination). */
+  async listExecutiveAuditLogs(params: {
+    page?: number;
+    limit?: number;
+    role?: string;
+    actionType?: string;
+    severity?: string;
+  }) {
+    const page = Math.max(1, params.page || 1);
+    const limit = Math.min(100, Math.max(1, params.limit || 50));
+    const skip = (page - 1) * limit;
+
+    const where: any = {};
+    if (params.role) {
+      where.executiveRole = params.role.toUpperCase();
+    }
+    if (params.severity) {
+      where.riskSeverity = params.severity.toUpperCase();
+    }
+    if (params.actionType) {
+      where.actionType = { contains: params.actionType, mode: 'insensitive' };
+    }
+
+    const [total, logs] = await Promise.all([
+      this.prisma.executiveAuditLog.count({ where }),
+      this.prisma.executiveAuditLog.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+        include: {
+          executive: {
+            select: { id: true, fullName: true, email: true, role: true },
+          },
+        },
+      }),
+    ]);
+
+    return {
+      data: logs,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
 }

@@ -28,7 +28,7 @@ import { cn } from "@/lib/utils";
 export interface FormField {
   name: string;
   label: string;
-  type?: "text" | "email" | "password" | "number" | "textarea" | "select" | "datetime" | "checkbox";
+  type?: "text" | "email" | "password" | "number" | "textarea" | "select" | "datetime" | "date" | "checkbox";
   options?: { value: string; label: string }[];
   value?: string | number | boolean;
   required?: boolean;

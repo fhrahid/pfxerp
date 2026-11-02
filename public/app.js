@@ -374,6 +374,7 @@ const TABS = [
   { id: 'notices', label: 'Notices', show: () => true },
   { id: 'chaos', label: 'Chaos', show: () => isCEO() || isPM() },
   { id: 'leaderboard', label: 'Leaderboard', show: () => true },
+  { id: 'audit', label: 'Audit Logs', show: () => isExec() },
   { id: 'settings', label: 'Settings', show: () => isCEO() },
 ];
 const TAB_TITLES = {
@@ -393,6 +394,7 @@ const TAB_TITLES = {
   notices: ['Secure Notices', 'End-to-end encrypted · zero-knowledge server'],
   chaos: ['Chaos Console', 'Live lab incidents and automated penalties'],
   leaderboard: ['Leaderboard', 'Score = 50% squad valuation + 50% wallet'],
+  audit: ['Audit Trail', 'Executive audit logs, security incidents, citations & login tracking'],
   settings: ['System Settings', 'Economic constants — CEO only'],
 };
 
@@ -464,7 +466,7 @@ async function render() {
     payroll: viewPayroll, finance: viewFinance, governance: viewGovernance,
     marketplace: viewMarketplace, consultancy: viewConsultancy, quality: viewQuality,
     bounty: viewBounty, clients: viewClients, notices: viewNotices, chaos: viewChaos,
-    leaderboard: viewLeaderboard, settings: viewSettings,
+    leaderboard: viewLeaderboard, audit: viewAudit, settings: viewSettings,
   };
   await loadSquads();
   await views[S.tab]?.();
@@ -529,6 +531,7 @@ async function viewKanban() {
             <span class="badge-sp">${t.storyPoints ? t.storyPoints + ' SP' : '—'}</span>
             <span class="badge-prio prio-${esc(t.priority)}">${esc(t.priority)}</span>
             ${t.gitPrUrl ? '<span title="Git PR Verified" style="color:var(--accent2);font-weight:700;">● PR</span>' : ''}
+            ${t.dueDate && !['CTO_VERIFIED','CLOSED'].includes(t.status) && new Date(t.dueDate) < new Date() ? '<span class="badge b-red" style="font-size:10px;padding:1px 4px;">⚠️ Overdue</span>' : (t.dueDate ? `<span class="muted" style="font-size:10px;">Due: ${dt(t.dueDate).slice(0, 10)}</span>` : '')}
           </div>
           <div class="m" style="font-size:11.5px;color:var(--muted);justify-content:space-between;">
             <span>${esc(t.assignedTo?.fullName || 'unassigned')}</span>
@@ -555,7 +558,9 @@ function uiCreateTask() {
     { name: 'title', label: 'Title', required: true },
     { name: 'description', label: 'Description', type: 'textarea' },
     { name: 'priority', label: 'Priority', type: 'select', options: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].map((p) => ({ value: p, label: p })), value: 'MEDIUM' },
+    { name: 'dueDate', label: 'Due date / Deadline', type: 'date' },
   ], 'Create', async (d) => {
+    if (d.dueDate) d.dueDate = new Date(d.dueDate).toISOString();
     const members = await api('GET', '/squads/' + d.squadId);
     const devOpts = members.members.filter((m) => m.role === 'DEVELOPER').map((m) => ({ value: m.userId, label: m.fullName }));
     if (devOpts.length) {
@@ -578,14 +583,20 @@ async function uiTaskDetail(id) {
   const canPm = t.status === 'FLAGGED_COMPLETE' && (isPM() || isCPO() || isCTO());
   const canCto = t.status === 'PM_VERIFIED' && isCTO();
   const canClose = t.status === 'CTO_VERIFIED' && (isPM() || isCTO());
+  const isOv = t.dueDate && !['CTO_VERIFIED','CLOSED'].includes(t.status) && new Date(t.dueDate) < new Date();
+  const isMissed = t.dueDate && ['CTO_VERIFIED','CLOSED'].includes(t.status) && (
+    (t.ctoVerifiedAt && new Date(t.ctoVerifiedAt) > new Date(t.dueDate)) ||
+    (t.flaggedCompleteAt && new Date(t.flaggedCompleteAt) > new Date(t.dueDate))
+  );
 
   openModal(t.title, `
-    <div class="pillrow" style="margin-bottom:10px">${statusBadge(t.status)} ${badge(t.priority, t.priority === 'CRITICAL' ? 'b-red' : 'b-gray')} ${badge(t.storyPoints + ' pts', 'b-blue')}</div>
+    <div class="pillrow" style="margin-bottom:10px">${statusBadge(t.status)} ${badge(t.priority, t.priority === 'CRITICAL' ? 'b-red' : 'b-gray')} ${badge(t.storyPoints + ' pts', 'b-blue')} ${isOv ? '<span class="badge b-red">⚠️ OVERDUE</span>' : isMissed ? '<span class="badge b-red">MISSED DEADLINE</span>' : ''}</div>
     <p class="muted">${esc(t.description || 'No description')}</p>
     <table>
       <tr><td>Assignee</td><td>${esc(t.assignedTo?.fullName || '—')}</td></tr>
       <tr><td>Squad</td><td>${esc(t.squad?.name)}</td></tr>
       <tr><td>PR / Commit</td><td class="mono">${esc(t.gitPrUrl || t.gitCommitHash || '—')}</td></tr>
+      ${t.dueDate ? `<tr><td>Due date</td><td style="${isOv ? 'color:var(--danger);font-weight:700;' : ''}">${dt(t.dueDate)} ${isOv ? '⚠️ (OVERDUE)' : isMissed ? '(MISSED)' : ''}</td></tr>` : ''}
       ${t.pmFeedback ? `<tr><td>PM feedback</td><td>${esc(t.pmFeedback)}</td></tr>` : ''}
       ${t.ctoCritique ? `<tr><td>CTO critique</td><td>${esc(t.ctoCritique)}</td></tr>` : ''}
       ${t.pmPenaltyPoints ? `<tr><td>Penalty points</td><td style="color:var(--danger)">-${t.pmPenaltyPoints}</td></tr>` : ''}
@@ -612,8 +623,8 @@ async function act(method, path, body, idem) {
 
 function uiFlag(id) {
   formModal('Flag complete — git proof required', [
-    { name: 'gitPrUrl', label: 'Pull request URL', value: 'https://github.com/pointfex/squad-1/pull/' + Math.floor(Math.random() * 99 + 10) },
-    { name: 'gitCommitHash', label: 'Commit hash', value: Array.from({ length: 40 }, () => '0123456789abcdef'[Math.floor(Math.random() * 16)]).join('') },
+    { name: 'gitPrUrl', label: 'Pull request URL', placeholder: 'https://github.com/pointfex/squad-1/pull/1' },
+    { name: 'gitCommitHash', label: 'Commit hash', placeholder: '40-character SHA-1 commit hash' },
   ], 'Flag complete', (d) => act('POST', `/tasks/${id}/flag-complete`, d));
 }
 function uiPmVerify(id) {
@@ -811,6 +822,89 @@ function uiTransferMember() {
 }
 
 /* ------------------------------ People (CRUD) ------------------------------ */
+async function uiUserProfile(id) {
+  try {
+    const u = await api('GET', '/users/' + id);
+    const s = u.stats || {};
+    const missed = u.missedDeadlineTasks || [];
+    const isDev = u.role === 'DEVELOPER';
+    const isPm = u.role === 'PM';
+
+    openModal(`Profile: ${esc(u.fullName)}`, `
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+          <div>
+            <div style="font-size:16px;font-weight:700;">${esc(u.fullName)} ${statusBadge(u.role)} ${u.isActive ? badge('ACTIVE', 'b-green') : badge('INACTIVE', 'b-red')}</div>
+            <div class="muted" style="font-size:12px;margin-top:4px;">${esc(u.email)} · ID: ${esc(u.studentId || '—')} · Joined: ${dt(u.createdAt)}</div>
+            <div style="margin-top:6px;">${(u.squadMemberships || []).map((m) => `<span class="badge b-gray" style="margin-right:4px;">${esc(m.squad?.name || '')} (${esc(m.role || 'MEMBER')})</span>`).join('') || '<span class="muted" style="font-size:12px;">No squad memberships</span>'}</div>
+          </div>
+          <div style="text-align:right;">
+            <div class="muted" style="font-size:11px;text-transform:uppercase;">Personal Wallet</div>
+            <div style="font-size:18px;font-weight:800;color:var(--accent2);">${money(u.walletBalance || 0)}</div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:8px;margin-bottom:14px;">
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px 10px;">
+          <div class="muted" style="font-size:11px;">TASKS & SP</div>
+          <div style="font-size:16px;font-weight:700;">${s.completedTasks || 0} / ${s.totalAssigned || 0}</div>
+          <div class="muted" style="font-size:10px;">${s.storyPointsCompleted || 0} / ${s.storyPointsAssigned || 0} SP</div>
+        </div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px 10px;">
+          <div class="muted" style="font-size:11px;">ON-TIME DELIVERY</div>
+          <div style="font-size:16px;font-weight:700;">${s.onTimeRate ?? 100}%</div>
+          <div class="muted" style="font-size:10px;">deadline compliance</div>
+        </div>
+        <div style="background:var(--bg);border:1px solid ${missed.length ? 'var(--danger)' : 'var(--border)'};border-radius:6px;padding:8px 10px;">
+          <div class="muted" style="font-size:11px;">MISSED DEADLINES</div>
+          <div style="font-size:16px;font-weight:700;color:${missed.length ? 'var(--danger)' : 'inherit'};">${missed.length}</div>
+          <div class="muted" style="font-size:10px;">${missed.length ? 'overdue / late' : 'perfect record'}</div>
+        </div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px 10px;">
+          <div class="muted" style="font-size:11px;">${isDev ? 'DPI SCORE' : isPm ? 'PMHI SCORE' : 'ROLE'}</div>
+          <div style="font-size:16px;font-weight:700;color:var(--accent);">${isDev ? (s.latestDpi ?? '—') : isPm ? (s.latestPmhi ?? '—') : 'Executive'}</div>
+          <div class="muted" style="font-size:10px;">${isDev ? 'flags: ' + (s.prematureFlagsCount || 0) : 'governance'}</div>
+        </div>
+      </div>
+
+      ${missed.length > 0 ? `
+        <h4 style="color:var(--danger);margin:12px 0 6px;">⚠️ Missed Deadlines & Overdue Tasks (${missed.length})</h4>
+        <table style="margin-bottom:14px;background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;">
+          <tr><th>Task</th><th>Squad</th><th>Status</th><th>Due Date</th><th>Delay</th></tr>
+          ${missed.map((t) => `<tr>
+            <td><b>${esc(t.title)}</b> <span class="muted" style="font-size:11px;">(${t.storyPoints} SP)</span></td>
+            <td>${esc(t.squadName || '—')}</td>
+            <td>${statusBadge(t.status)}</td>
+            <td style="color:var(--danger);font-family:monospace;">${dt(t.dueDate)}</td>
+            <td><span class="badge b-red">${t.daysOverdue} days late</span> ${t.isCurrentlyOverdue ? '<b>(Still Open)</b>' : '(Done late)'}</td>
+          </tr>`).join('')}
+        </table>
+      ` : ''}
+
+      <h4 style="margin:12px 0 6px;">Assigned Task History (${(u.assignedTasks || []).length})</h4>
+      <div style="max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;margin-bottom:14px;">
+        <table>
+          <tr><th>Title</th><th>Squad</th><th>Status</th><th>SP</th><th>Due</th><th>Git Proof</th></tr>
+          ${(u.assignedTasks || []).map((t) => {
+            const isOv = t.dueDate && !['CTO_VERIFIED','CLOSED'].includes(t.status) && new Date(t.dueDate) < new Date();
+            return `<tr>
+              <td><b>${esc(t.title)}</b></td>
+              <td>${esc(t.squad?.name || '—')}</td>
+              <td>${statusBadge(t.status)}</td>
+              <td>${t.storyPoints}</td>
+              <td style="${isOv ? 'color:var(--danger);font-weight:700;' : ''}">${t.dueDate ? dt(t.dueDate).slice(0, 10) + (isOv ? ' ⚠️' : '') : '—'}</td>
+              <td class="mono" style="font-size:11px;">${esc(t.gitPrUrl || t.gitCommitHash || '—')}</td>
+            </tr>`;
+          }).join('') || '<tr><td colspan="6" class="muted text-center">No assigned tasks</td></tr>'}
+        </table>
+      </div>
+    `);
+  } catch (e) {
+    toast('Failed to load profile: ' + e.message, false);
+  }
+}
+
 async function viewRoster() {
   const users = await api('GET', '/users');
   tabActions(`
@@ -820,10 +914,11 @@ async function viewRoster() {
   C().innerHTML = `<div class="panel"><table>
     <tr><th>Name</th><th>Role</th><th>Email</th><th>Student ID</th><th>Squads</th><th></th></tr>
     ${users.map((u) => `<tr>
-      <td><b>${esc(u.fullName)}</b></td><td>${statusBadge(u.role)}</td>
+      <td><a href="#" onclick="event.preventDefault();uiUserProfile('${u.id}')" style="color:var(--primary);font-weight:600;text-decoration:none;">${esc(u.fullName)} ↗</a></td><td>${statusBadge(u.role)}</td>
       <td class="muted">${esc(u.email)}</td><td class="mono">${esc(u.studentId || '—')}</td>
       <td>${(u.squadMemberships || []).map((m) => esc(m.squad?.name || '')).join(', ') || '—'}</td>
       <td class="row">
+        <button class="btn sm secondary" onclick="uiUserProfile('${u.id}')">Profile</button>
         <button class="btn sm" onclick="uiCopy('${u.id}')">ID</button>
         ${canManage() ? `<button class="btn sm" onclick="uiUserEdit('${u.id}','${esc(u.fullName)}','${esc(u.email)}','${u.role}','${esc(u.studentId || '')}')">Edit</button>` : ''}
       </td></tr>`).join('')}
@@ -1027,6 +1122,8 @@ async function uiInviteDeveloper(defaultSquadId = '') {
     const inviteUrl = res.inviteUrl || '';
     const assignedRole = res.role || fd.role || 'DEVELOPER';
     const expiresAtText = res.expiresAt ? dt(res.expiresAt) : 'In 72 hours';
+    const emailDelivered = Boolean(res.emailDelivery?.delivered);
+    const emailError = res.emailDelivery?.error || '';
 
     openModal('Invitation Dispatched!', `
       <div style="display:flex;flex-direction:column;gap:14px;">
@@ -1034,7 +1131,22 @@ async function uiInviteDeveloper(defaultSquadId = '') {
           <div style="font-size:13.5px;margin-bottom:6px;"><b>Recipient:</b> ${esc(email)}</div>
           <div style="font-size:13.5px;margin-bottom:6px;"><b>Assigned Role:</b> <span class="badge b-blue">${esc(assignedRole)}</span></div>
           <div style="font-size:13.5px;margin-bottom:6px;"><b>Expires At:</b> <span class="muted">${esc(expiresAtText)}</span> (Strict 72-hour limit)</div>
-          <div style="font-size:12.5px;color:var(--muted);margin-top:6px;">Invitation email dispatched via Resend. The developer can also join directly using the shareable link below:</div>
+          <div style="font-size:13.5px;margin-bottom:6px;">
+            <b>Mail Status:</b> ${emailDelivered 
+              ? '<span class="badge b-green">✓ Sent via Resend</span>' 
+              : '<span class="badge b-red">⚠️ Mail NOT Sent</span>'}
+          </div>
+          ${emailDelivered ? `
+            <div style="font-size:12.5px;color:var(--muted);margin-top:6px;">Invitation email dispatched via Resend. The developer can also join directly using the shareable link below:</div>
+          ` : `
+            <div style="background:rgba(239, 68, 68, 0.12);border:1px solid var(--danger);border-radius:6px;padding:10px;margin-top:8px;font-size:12px;color:var(--danger);line-height:1.4;">
+              <b>⚠️ Email was NOT delivered to the recipient\'s inbox!</b><br/>
+              ${emailError ? `<span style="opacity:0.9;">Reason: ${esc(emailError)}</span><br/>` : ''}
+              <span style="color:var(--text);font-weight:600;display:inline-block;margin-top:4px;">
+                👉 You MUST copy the link below and send it directly to the user so they can activate their account.
+              </span>
+            </div>
+          `}
         </div>
 
         ${inviteUrl ? `
@@ -1054,7 +1166,11 @@ async function uiInviteDeveloper(defaultSquadId = '') {
       </div>
     `);
 
-    toast('Invitation dispatched to ' + email);
+    if (emailDelivered) {
+      toast('Invitation email sent to ' + email, true);
+    } else {
+      toast('Invitation link created, but email was NOT sent! Copy the link.', false);
+    }
     if (S.tab === 'invitations') {
       viewInvitations();
     }
@@ -1066,11 +1182,29 @@ async function uiResendInvitation(id) {
   try {
     const res = await api('POST', `/invitations/${id}/resend`);
     const inviteUrl = res.inviteUrl || '';
-    toast(inviteUrl ? 'Invitation resent! Dev link: ' + inviteUrl : 'Invitation resent! 72-hour window refreshed.');
+    const emailDelivered = Boolean(res.emailDelivery?.delivered);
+    const emailError = res.emailDelivery?.error || '';
+
+    if (emailDelivered) {
+      toast('Invitation resent & email delivered to ' + (res.email || 'recipient'), true);
+    } else {
+      toast('72h window refreshed, but email was NOT sent! Share the new link.', false);
+    }
+
     if (inviteUrl) {
       openModal('Invitation Refreshed (72h)', `
         <div style="display:flex;flex-direction:column;gap:14px;">
-          <p style="font-size:13.5px;margin:0;">The 72-hour validity window has been refreshed and a new email dispatched via Resend.</p>
+          ${emailDelivered ? `
+            <p style="font-size:13.5px;margin:0;">The 72-hour validity window has been refreshed and a new email dispatched via Resend.</p>
+          ` : `
+            <div style="background:rgba(239, 68, 68, 0.12);border:1px solid var(--danger);border-radius:6px;padding:10px;font-size:12px;color:var(--danger);line-height:1.4;">
+              <b>⚠️ Email was NOT delivered to the recipient!</b><br/>
+              ${emailError ? `<span style="opacity:0.9;">Reason: ${esc(emailError)}</span><br/>` : ''}
+              <span style="color:var(--text);font-weight:600;display:inline-block;margin-top:4px;">
+                👉 You MUST copy the refreshed onboarding link below and provide it directly to the user.
+              </span>
+            </div>
+          `}
           <div>
             <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;color:var(--muted);">New Shareable Onboarding Link</label>
             <div style="display:flex;gap:8px;">
@@ -1661,6 +1795,32 @@ async function viewLeaderboard() {
       <tr><th>#</th><th>Student</th><th>Role</th><th>Wallet</th><th>Squad valuation</th><th>Score</th></tr>
       ${lb.studentScores.slice(0, 15).map((s, i) => `<tr><td>${i + 1}</td><td>${esc(s.fullName)}</td><td>${badge(s.role, 'b-gray')}</td><td class="money">${money(s.walletBalance)}</td><td>${money(s.squadValuation)}</td><td><b>${s.simulationScore}</b></td></tr>`).join('')}
     </table></div>`;
+}
+
+/* ------------------------------ Audit Logs ------------------------------ */
+async function viewAudit() {
+  const res = await api('GET', '/audit/logs?limit=50');
+  const logs = (res && res.data) || [];
+  tabActions(`
+    <button class="btn secondary" onclick="viewAudit()">Refresh</button>
+  `);
+  C().innerHTML = `<div class="panel">
+    <div style="margin-bottom:12px;font-size:13px;color:var(--muted);display:flex;justify-content:space-between;align-items:center;">
+      <span>Total executive audit logs: <b>${res?.meta?.total || logs.length}</b></span>
+      <span class="muted" style="font-size:11px;">Showing recent 50 entries</span>
+    </div>
+    <table>
+      <tr><th>Timestamp</th><th>Actor</th><th>Role</th><th>Action</th><th>Severity</th><th>Payload</th></tr>
+      ${logs.map((l) => `<tr>
+        <td class="mono" style="font-size:11px;white-space:nowrap;">${dt(l.createdAt)}</td>
+        <td><b>${esc(l.executive?.fullName || l.executiveRole)}</b><br><span class="muted" style="font-size:11px;">${esc(l.executive?.email || '')}</span></td>
+        <td>${badge(l.executiveRole, 'b-gray')}</td>
+        <td class="mono" style="font-size:12px;font-weight:600;">${esc(l.actionType)}</td>
+        <td>${badge(l.riskSeverity, l.riskSeverity === 'CRITICAL' ? 'b-red' : l.riskSeverity === 'WARNING' ? 'b-yellow' : 'b-gray')}</td>
+        <td><button class="btn sm" onclick="alert(JSON.stringify(${esc(JSON.stringify(l.payloadSnapshot))}, null, 2))">Inspect</button></td>
+      </tr>`).join('') || '<tr><td colspan="6" class="muted text-center">No audit logs found</td></tr>'}
+    </table>
+  </div>`;
 }
 
 /* ------------------------------ Settings ------------------------------ */

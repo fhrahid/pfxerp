@@ -21,6 +21,7 @@ import {
   Zap,
   Trophy,
   Settings,
+  FileText,
   LogOut,
   Menu,
   X,
@@ -58,6 +59,7 @@ const NAV = [
   { href: "/notices", label: "Notices", icon: Bell, roles: null },
   { href: "/chaos", label: "Chaos", icon: Zap, roles: ["CEO", "PM"] },
   { href: "/leaderboard", label: "Leaderboard", icon: Trophy, roles: null },
+  { href: "/audit-logs", label: "Audit Logs", icon: FileText, roles: ["CEO", "CFO", "CTO", "CPO"] },
   { href: "/settings", label: "Settings", icon: Settings, roles: ["CEO"] },
 ];
 

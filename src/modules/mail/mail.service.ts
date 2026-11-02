@@ -11,6 +11,14 @@ export interface SentEmailRecord {
   messageId?: string;
 }
 
+export interface MailDeliveryResult {
+  success: boolean;
+  delivered: boolean;
+  simulated: boolean;
+  error?: string;
+  messageId?: string;
+}
+
 function escapeHtml(str: string): string {
   return String(str || '').replace(/[&<>"']/g, (c) => ({
     '&': '&amp;',
@@ -66,7 +74,7 @@ export class MailService {
     inviterName: string;
     role: string;
     expiresInHours?: number;
-  }): Promise<{ success: boolean; simulated: boolean; messageId?: string }> {
+  }): Promise<MailDeliveryResult> {
     const { to, inviteUrl, inviterName, role, expiresInHours = 72 } = options;
     const safeInviter = escapeHtml(inviterName);
     const safeRole = escapeHtml(role);
@@ -134,7 +142,12 @@ export class MailService {
 
         if (error) {
           this.logger.error(`Failed to send invitation email via Resend to ${to}: ${error.message}`);
-          throw error;
+          return {
+            success: false,
+            delivered: false,
+            simulated: false,
+            error: error.message,
+          };
         }
 
         const record: SentEmailRecord = {
@@ -148,9 +161,16 @@ export class MailService {
         };
         this.recordEmail(record);
         this.logger.log(`Invitation email dispatched via Resend to ${to} (Message ID: ${data?.id})`);
-        return { success: true, simulated: false, messageId: data?.id };
+        return { success: true, delivered: true, simulated: false, messageId: data?.id };
       } catch (err) {
-        this.logger.error(`Resend API error: ${(err as Error).message}. Falling back to simulation.`);
+        const errMsg = (err as Error).message || 'Resend delivery failed';
+        this.logger.error(`Resend API error: ${errMsg}. Falling back to simulation.`);
+        return {
+          success: false,
+          delivered: false,
+          simulated: true,
+          error: errMsg,
+        };
       }
     }
 
@@ -165,14 +185,19 @@ export class MailService {
     };
     this.recordEmail(record);
     this.logger.log(`[SIMULATED EMAIL] Invitation sent to ${to}. Invite Link: ${inviteUrl} (Expires in ${expiresInHours}h)`);
-    return { success: true, simulated: true };
+    return {
+      success: true,
+      delivered: false,
+      simulated: true,
+      error: 'Resend API key not configured (running in local simulation mode).',
+    };
   }
 
   async sendPasswordResetEmail(options: {
     to: string;
     resetUrl: string;
     expiresInMinutes?: number;
-  }): Promise<{ success: boolean; simulated: boolean; messageId?: string }> {
+  }): Promise<MailDeliveryResult> {
     const { to, resetUrl, expiresInMinutes = 60 } = options;
     const subject = `Reset your Pointfex ERP password`;
 
@@ -237,7 +262,12 @@ export class MailService {
 
         if (error) {
           this.logger.error(`Failed to send password reset email via Resend to ${to}: ${error.message}`);
-          throw error;
+          return {
+            success: false,
+            delivered: false,
+            simulated: false,
+            error: error.message,
+          };
         }
 
         const record: SentEmailRecord = {
@@ -251,9 +281,16 @@ export class MailService {
         };
         this.recordEmail(record);
         this.logger.log(`Password reset email dispatched via Resend to ${to} (Message ID: ${data?.id})`);
-        return { success: true, simulated: false, messageId: data?.id };
+        return { success: true, delivered: true, simulated: false, messageId: data?.id };
       } catch (err) {
-        this.logger.error(`Resend API error: ${(err as Error).message}. Falling back to simulation.`);
+        const errMsg = (err as Error).message || 'Resend delivery failed';
+        this.logger.error(`Resend API error: ${errMsg}. Falling back to simulation.`);
+        return {
+          success: false,
+          delivered: false,
+          simulated: true,
+          error: errMsg,
+        };
       }
     }
 
@@ -268,6 +305,11 @@ export class MailService {
     };
     this.recordEmail(record);
     this.logger.log(`[SIMULATED EMAIL] Password reset sent to ${to}. Reset Link: ${resetUrl} (Expires in ${expiresInMinutes}m)`);
-    return { success: true, simulated: true };
+    return {
+      success: true,
+      delivered: false,
+      simulated: true,
+      error: 'Resend API key not configured (running in local simulation mode).',
+    };
   }
 }

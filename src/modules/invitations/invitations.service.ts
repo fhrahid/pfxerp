@@ -101,7 +101,7 @@ export class InvitationsService {
     });
     const inviterName = inviterRecord?.fullName || `${inviter.role} Executive`;
 
-    await this.mailService.sendInvitationEmail({
+    const mailResult = await this.mailService.sendInvitationEmail({
       to: email,
       inviteUrl,
       inviterName,
@@ -119,6 +119,11 @@ export class InvitationsService {
       expiresAt: invitation.expiresAt,
       createdAt: invitation.createdAt,
       targetSquadId: invitation.targetSquadId,
+      emailDelivery: {
+        delivered: mailResult.delivered,
+        simulated: mailResult.simulated,
+        error: mailResult.error || null,
+      },
       ...(process.env.NODE_ENV !== 'production' ? { inviteUrl, rawToken } : {}),
     };
   }
@@ -215,7 +220,7 @@ export class InvitationsService {
     });
     const inviterName = inviterRecord?.fullName || `${inviter.role} Executive`;
 
-    await this.mailService.sendInvitationEmail({
+    const mailResult = await this.mailService.sendInvitationEmail({
       to: updated.email,
       inviteUrl,
       inviterName,
@@ -227,10 +232,17 @@ export class InvitationsService {
 
     return {
       success: true,
-      message: 'Invitation resent successfully with a renewed 72-hour validity window.',
+      message: mailResult.delivered
+        ? 'Invitation resent successfully with email delivered via Resend.'
+        : `Invitation link refreshed, but email could not be delivered to ${updated.email} (${mailResult.error || 'simulated mode'}).`,
       id: updated.id,
       email: updated.email,
       expiresAt: updated.expiresAt,
+      emailDelivery: {
+        delivered: mailResult.delivered,
+        simulated: mailResult.simulated,
+        error: mailResult.error || null,
+      },
       ...(process.env.NODE_ENV !== 'production' ? { inviteUrl, rawToken } : {}),
     };
   }

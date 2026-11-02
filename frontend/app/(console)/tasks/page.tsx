@@ -100,15 +100,37 @@ export default function TasksPage() {
 }
 
 function TaskCard({ task: t }: { task: any }) {
+  const now = new Date();
+  const isDone = ["CTO_VERIFIED", "CLOSED"].includes(t.status);
+  const hasDue = Boolean(t.dueDate);
+  const isOverdue = hasDue && !isDone && new Date(t.dueDate) < now;
+  const isMissed = hasDue && isDone && (
+    (t.ctoVerifiedAt && new Date(t.ctoVerifiedAt) > new Date(t.dueDate)) ||
+    (t.flaggedCompleteAt && new Date(t.flaggedCompleteAt) > new Date(t.dueDate))
+  );
+
   return (
     <Dialog>
       <DialogTrigger asChild>
         <button className="w-full rounded-lg border bg-card p-3 text-left shadow-sm transition-shadow hover:shadow-md">
           <div className="text-[13px] font-semibold leading-snug">{t.title}</div>
-          <div className="mt-1.5 flex items-center gap-1.5">
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             <Badge variant={t.priority === "CRITICAL" ? "destructive" : "muted"} className="px-1.5 py-0 text-[10px]">
               {t.priority}
             </Badge>
+            {isOverdue ? (
+              <Badge variant="destructive" className="px-1.5 py-0 text-[10px]">
+                ⚠️ Overdue: {new Date(t.dueDate).toLocaleDateString()}
+              </Badge>
+            ) : isMissed ? (
+              <Badge variant="destructive" className="px-1.5 py-0 text-[10px]">
+                Missed Deadline
+              </Badge>
+            ) : hasDue ? (
+              <Badge variant="muted" className="px-1.5 py-0 text-[10px]">
+                Due: {new Date(t.dueDate).toLocaleDateString()}
+              </Badge>
+            ) : null}
           </div>
           <div className="mt-1 text-[11px] text-muted-foreground">{t.assignedTo?.fullName || "unassigned"}</div>
         </button>
@@ -127,17 +149,34 @@ function TaskDetail({ id }: { id: string }) {
   const task = useQuery({ queryKey: ["task", id], queryFn: () => api("GET", `/tasks/${id}`) });
   if (task.isLoading) return <Skeleton className="h-40 w-full" />;
   const t = task.data;
+  const isOverdue = t.dueDate && !["CTO_VERIFIED", "CLOSED"].includes(t.status) && new Date(t.dueDate) < new Date();
+  const isMissed = t.dueDate && ["CTO_VERIFIED", "CLOSED"].includes(t.status) && (
+    (t.ctoVerifiedAt && new Date(t.ctoVerifiedAt) > new Date(t.dueDate)) ||
+    (t.flaggedCompleteAt && new Date(t.flaggedCompleteAt) > new Date(t.dueDate))
+  );
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-1.5">
         <Badge variant={statusVariant(t.status)}>{t.status}</Badge>
         <Badge variant={t.priority === "CRITICAL" ? "destructive" : "muted"}>{t.priority}</Badge>
+        {isOverdue ? (
+          <Badge variant="destructive">⚠️ Overdue ({new Date(t.dueDate).toLocaleDateString()})</Badge>
+        ) : isMissed ? (
+          <Badge variant="destructive">Missed Deadline</Badge>
+        ) : null}
       </div>
       {t.description ? <p className="text-sm text-muted-foreground">{t.description}</p> : null}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-sm">
         <Row label="Assignee" value={t.assignedTo?.fullName || "—"} />
         <Row label="Squad" value={t.squad?.name} />
         <Row label="PR / commit" value={t.gitPrUrl || t.gitCommitHash || "—"} mono />
+        {t.dueDate ? (
+          <Row
+            label="Deadline (Due Date)"
+            value={`${new Date(t.dueDate).toLocaleDateString()} ${isOverdue ? "— OVERDUE" : isMissed ? "— MISSED" : ""}`}
+          />
+        ) : null}
         {t.pmFeedback ? <Row label="PM feedback" value={t.pmFeedback} /> : null}
         {t.ctoCritique ? <Row label="CTO critique" value={t.ctoCritique} /> : null}
       </div>
@@ -208,9 +247,23 @@ function CreateTaskButton({ squadId }: { squadId: string }) {
           options: [{ value: "", label: "— leave in backlog —" }, ...devOptions],
           value: "",
         },
+        {
+          name: "dueDate",
+          label: "Due date (Deadline)",
+          type: "date",
+        },
       ]}
       submitLabel="Create task"
-      onSubmit={(d) => api("POST", "/tasks", { squadId, title: d.title, description: d.description, priority: d.priority, ...(d.assignedToId ? { assignedToId: d.assignedToId } : {}) })}
+      onSubmit={(d) =>
+        api("POST", "/tasks", {
+          squadId,
+          title: d.title,
+          description: d.description,
+          priority: d.priority,
+          ...(d.assignedToId ? { assignedToId: d.assignedToId } : {}),
+          ...(d.dueDate ? { dueDate: new Date(d.dueDate).toISOString() } : {}),
+        })
+      }
     />
   );
 }

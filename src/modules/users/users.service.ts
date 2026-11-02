@@ -146,6 +146,197 @@ export class UsersService {
         ...(dto.password || dto.isActive === false ? { refreshTokenHash: null } : {}),
       },
     });
+
+    if (caller) {
+      try {
+        const callerRole = (Object.values(UserRole).includes(caller.role as any) ? caller.role : 'CPO') as UserRole;
+        await this.prisma.executiveAuditLog.create({
+          data: {
+            executiveId: (caller as any).id || userId,
+            executiveRole: callerRole,
+            actionType: 'USER_PROFILE_UPDATED',
+            riskSeverity: dto.isActive === false ? 'WARNING' : 'INFO',
+            payloadSnapshot: {
+              targetUserId: userId,
+              updatedFields: Object.keys(dto).filter((k) => (dto as any)[k] !== undefined && k !== 'password'),
+              passwordChanged: Boolean(dto.password),
+              isActive: dto.isActive,
+              role: assignedRole,
+            },
+          },
+        });
+      } catch {
+        // Non-blocking audit log
+      }
+    }
+
     return this.safe(updated);
+  }
+
+  /**
+   * Detailed profile view including work history, performance metrics (DPI/PMHI),
+   * and missed deadline / overdue tracking.
+   */
+  async getUserProfile(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        account: true,
+        squadMemberships: {
+          where: { leftAt: null },
+          select: {
+            squadId: true,
+            role: true,
+            allocation: true,
+            squad: { select: { id: true, name: true, healthStatus: true } },
+          },
+        },
+      },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    const [assignedTasks, createdTasks, dpiSnapshots, pmhiSnapshots, citations] = await Promise.all([
+      this.prisma.task.findMany({
+        where: { assignedToId: userId },
+        include: {
+          squad: { select: { id: true, name: true } },
+        },
+        orderBy: [{ dueDate: 'asc' }, { updatedAt: 'desc' }],
+        take: 100,
+      }),
+      this.prisma.task.findMany({
+        where: { assignedById: userId },
+        include: {
+          squad: { select: { id: true, name: true } },
+          assignedTo: { select: { id: true, fullName: true, role: true } },
+        },
+        orderBy: { updatedAt: 'desc' },
+        take: 50,
+      }),
+      this.prisma.developerPerformanceSnapshot.findMany({
+        where: { userId },
+        orderBy: { sprintNumber: 'desc' },
+        take: 10,
+      }),
+      this.prisma.pmPerformanceSnapshot.findMany({
+        where: { userId },
+        orderBy: { sprintNumber: 'desc' },
+        take: 10,
+      }),
+      this.prisma.codeAuditCitation.findMany({
+        where: {
+          squad: {
+            memberships: { some: { userId, leftAt: null } },
+          },
+        },
+        include: { squad: { select: { id: true, name: true } } },
+        take: 10,
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
+
+    const now = new Date();
+    let totalAssigned = assignedTasks.length;
+    let completedTasks = 0;
+    let inProgressTasks = 0;
+    let overdueTasksCount = 0;
+    let storyPointsAssigned = 0;
+    let storyPointsCompleted = 0;
+    let onTimeDeliveryCount = 0;
+
+    const missedDeadlineTasks: Array<{
+      id: string;
+      title: string;
+      status: string;
+      priority: string;
+      storyPoints: number;
+      dueDate: Date;
+      completionTime?: Date | null;
+      squadName?: string;
+      isCurrentlyOverdue: boolean;
+      daysOverdue: number;
+    }> = [];
+
+    for (const t of assignedTasks) {
+      const sp = t.storyPoints || 0;
+      storyPointsAssigned += sp;
+      const isCompleted = t.status === 'CTO_VERIFIED' || t.status === 'CLOSED';
+
+      if (t.dueDate) {
+        const due = new Date(t.dueDate);
+        if (!isCompleted) {
+          if (due < now) {
+            overdueTasksCount++;
+            missedDeadlineTasks.push({
+              id: t.id,
+              title: t.title,
+              status: t.status,
+              priority: t.priority,
+              storyPoints: t.storyPoints,
+              dueDate: t.dueDate,
+              squadName: t.squad?.name,
+              isCurrentlyOverdue: true,
+              daysOverdue: Math.ceil((now.getTime() - due.getTime()) / (1000 * 60 * 60 * 24)),
+            });
+          }
+        } else {
+          // Completed task - check if completed late
+          const completionTime = t.ctoVerifiedAt || t.flaggedCompleteAt;
+          if (completionTime && new Date(completionTime) > due) {
+            overdueTasksCount++;
+            missedDeadlineTasks.push({
+              id: t.id,
+              title: t.title,
+              status: t.status,
+              priority: t.priority,
+              storyPoints: t.storyPoints,
+              dueDate: t.dueDate,
+              completionTime,
+              squadName: t.squad?.name,
+              isCurrentlyOverdue: false,
+              daysOverdue: Math.ceil((new Date(completionTime).getTime() - due.getTime()) / (1000 * 60 * 60 * 24)),
+            });
+          } else {
+            onTimeDeliveryCount++;
+          }
+        }
+      }
+
+      if (isCompleted) {
+        completedTasks++;
+        storyPointsCompleted += sp;
+      } else {
+        inProgressTasks++;
+      }
+    }
+
+    const latestDpi = dpiSnapshots[0]?.dpiScore ? Number(dpiSnapshots[0].dpiScore) : null;
+    const latestPmhi = pmhiSnapshots[0]?.pmhiScore ? Number(pmhiSnapshots[0].pmhiScore) : null;
+    const onTimeRate = completedTasks > 0 ? Math.round((onTimeDeliveryCount / completedTasks) * 100) : 100;
+
+    return {
+      ...this.safe(user),
+      createdAt: user.createdAt,
+      walletBalance: user.account ? Number(user.account.balance) : 0,
+      squadMemberships: user.squadMemberships,
+      stats: {
+        totalAssigned,
+        completedTasks,
+        inProgressTasks,
+        overdueTasksCount,
+        storyPointsAssigned,
+        storyPointsCompleted,
+        onTimeRate,
+        latestDpi,
+        latestPmhi,
+        prematureFlagsCount: dpiSnapshots[0]?.prematureFlagsCount || 0,
+      },
+      assignedTasks,
+      createdTasks,
+      missedDeadlineTasks,
+      dpiSnapshots,
+      pmhiSnapshots,
+      citations,
+    };
   }
 }

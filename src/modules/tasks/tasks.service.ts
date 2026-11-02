@@ -329,8 +329,17 @@ export class TasksService {
       throw new ForbiddenException('Only the assigned developer can flag completion');
     }
     await this.chaos.assertNotLockedOut(user.id);
-    if (!dto.gitPrUrl && !dto.gitCommitHash) {
+    const prUrl = dto.gitPrUrl?.trim() || undefined;
+    const commitHash = dto.gitCommitHash?.trim() || undefined;
+
+    if (!prUrl && !commitHash) {
       throw new BadRequestException('TASK_MISSING_GIT_LINK: a valid PR URL or commit hash is required');
+    }
+    if (commitHash && !/^[a-fA-F0-9]{7,40}$/.test(commitHash)) {
+      throw new BadRequestException('TASK_INVALID_GIT_HASH: commit hash must be a 7 to 40 character hexadecimal string');
+    }
+    if (prUrl && !/^https?:\/\/.+/i.test(prUrl)) {
+      throw new BadRequestException('TASK_INVALID_GIT_URL: PR URL must be a valid HTTP or HTTPS URL');
     }
 
     const flaggedAt = new Date();
@@ -339,10 +348,10 @@ export class TasksService {
       task,
       TaskStatus.FLAGGED_COMPLETE,
       user.id,
-      `Flagged complete with PR: ${dto.gitPrUrl || dto.gitCommitHash}`,
+      `Flagged complete with PR: ${prUrl || commitHash}`,
       {
-        gitPrUrl: dto.gitPrUrl,
-        gitCommitHash: dto.gitCommitHash,
+        gitPrUrl: prUrl,
+        gitCommitHash: commitHash,
         flaggedCompleteAt: flaggedAt,
         lastCommitTimestamp: commitTs,
       },

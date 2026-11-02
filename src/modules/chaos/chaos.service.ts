@@ -130,11 +130,15 @@ export class ChaosService implements OnModuleInit, OnModuleDestroy {
     if (!event) throw new NotFoundException('Chaos event not found');
     if (event.resolvedAt) throw new BadRequestException('Event already resolved');
 
-    if (user.role !== UserRole.CEO && event.targetSquadId) {
-      const isPM = await this.prisma.squadMembership.findFirst({
-        where: { userId: user.id, squadId: event.targetSquadId, role: 'PM', leftAt: null },
-      });
-      if (!isPM) throw new ForbiddenException('Only the target squad PM or CEO may resolve this incident');
+    if (user.role !== UserRole.CEO) {
+      if (event.targetSquadId) {
+        const isPM = await this.prisma.squadMembership.findFirst({
+          where: { userId: user.id, squadId: event.targetSquadId, role: 'PM', leftAt: null },
+        });
+        if (!isPM) throw new ForbiddenException('Only the target squad PM or CEO may resolve this incident');
+      } else {
+        throw new ForbiddenException('Only the CEO may resolve studio-wide incidents');
+      }
     }
 
     const updated = await this.prisma.chaosEvent.update({
