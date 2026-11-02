@@ -396,13 +396,35 @@ const TAB_TITLES = {
   settings: ['System Settings', 'Economic constants — CEO only'],
 };
 
+function toggleSidebar(open) {
+  const sb = document.getElementById('sidebar');
+  const ov = document.getElementById('sidebar-overlay');
+  if (!sb) return;
+  const isCurrentlyOpen = sb.classList.contains('open');
+  const next = open !== undefined ? open : !isCurrentlyOpen;
+  if (next) {
+    sb.classList.add('open');
+    ov?.classList.add('open');
+  } else {
+    sb.classList.remove('open');
+    ov?.classList.remove('open');
+  }
+}
+window.toggleSidebar = toggleSidebar;
+
 function renderShell() {
   const u = S.user;
   const tabs = TABS.filter((t) => t.show());
   document.getElementById('app').innerHTML = `
-    <nav class="sidebar">
-      <div class="brand">POINT<span>FEX</span><em>ERP</em></div>
-      ${tabs.map((t) => `<a class="nav-btn ${S.tab === t.id ? 'active' : ''}" href="#" onclick="event.preventDefault();setTab('${t.id}')">${t.label}</a>`).join('')}
+    <div id="sidebar-overlay" class="sidebar-overlay" onclick="toggleSidebar(false)"></div>
+    <nav id="sidebar" class="sidebar">
+      <div class="sidebar-header">
+        <div class="brand">POINT<span>FEX</span><em>ERP</em></div>
+        <button class="sidebar-close-btn" onclick="toggleSidebar(false)" aria-label="Close navigation">&times;</button>
+      </div>
+      <div class="nav-list">
+        ${tabs.map((t) => `<a class="nav-btn ${S.tab === t.id ? 'active' : ''}" href="#" onclick="event.preventDefault();setTab('${t.id}')">${t.label}</a>`).join('')}
+      </div>
       <div class="spacer"></div>
       <div class="userbox">
         <div class="name">${esc(u.fullName)}</div>
@@ -413,8 +435,13 @@ function renderShell() {
     </nav>
     <main class="main">
       <header class="topbar">
-        <div><h2>${TAB_TITLES[S.tab]?.[0] || ''}</h2><div class="sub">${TAB_TITLES[S.tab]?.[1] || ''}</div></div>
-        <div class="row">
+        <div class="topbar-left">
+          <button class="mobile-menu-btn" onclick="toggleSidebar(true)" aria-label="Open navigation">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+          </button>
+          <div><h2>${TAB_TITLES[S.tab]?.[0] || ''}</h2><div class="sub">${TAB_TITLES[S.tab]?.[1] || ''}</div></div>
+        </div>
+        <div class="row topbar-right">
           <span id="sprint-chip" class="sprint-chip ${isExec() ? 'editable' : ''}" ${isExec() ? "title='Click to change the active sprint'" : ''} onclick="${isExec() ? "uiSetSprint()" : ''}">Sprint ${S.currentSprint ?? '—'}</span>
           <div id="tab-actions" class="row"></div>
         </div>
@@ -422,7 +449,7 @@ function renderShell() {
       <div id="content"></div>
     </main>`;
 }
-function setTab(id) { S.tab = id; renderShell(); render(); }
+function setTab(id) { S.tab = id; renderShell(); render(); toggleSidebar(false); }
 function tabActions(html) { const el = document.getElementById('tab-actions'); if (el) el.innerHTML = html; }
 const C = () => document.getElementById('content');
 
@@ -498,8 +525,15 @@ async function viewKanban() {
       ${byStatus[col].map((t) => `
         <div class="kcard" onclick="uiTaskDetail('${t.id}')">
           <div class="t">${esc(t.title)}</div>
-          <div class="m"><span>${esc(t.priority)}</span></div>
-          <div class="m"><span>${esc(t.assignedTo?.fullName || 'unassigned')}</span></div>
+          <div class="m">
+            <span class="badge-sp">${t.storyPoints ? t.storyPoints + ' SP' : '—'}</span>
+            <span class="badge-prio prio-${esc(t.priority)}">${esc(t.priority)}</span>
+            ${t.gitPrUrl ? '<span title="Git PR Verified" style="color:var(--accent2);font-weight:700;">● PR</span>' : ''}
+          </div>
+          <div class="m" style="font-size:11.5px;color:var(--muted);justify-content:space-between;">
+            <span>${esc(t.assignedTo?.fullName || 'unassigned')}</span>
+            ${t.squad ? `<span style="opacity:0.75;">${esc(t.squad.name)}</span>` : ''}
+          </div>
         </div>`).join('') || '<div class="muted" style="font-size:11.5px;padding:6px 2px">—</div>'}
     </div>`).join('')}
   </div>`;

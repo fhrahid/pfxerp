@@ -238,12 +238,18 @@ export class SquadsService {
   async repoActivity(user: { id: string; role: string }, squadId: string, repoId: string) {
     await this.assertSquadMemberOrExec(user, squadId);
     const r = await this.getRepoEntity(squadId, repoId);
-    const commits = (await this.gh(`/repos/${r.owner}/${r.repo}/commits?per_page=30`, r.token)) as any[];
+    let commits: any[];
+    try {
+      commits = (await this.gh(`/repos/${r.owner}/${r.repo}/commits?per_page=30`, r.token)) as any[];
+    } catch {
+      commits = [];
+    }
+    const list = Array.isArray(commits) ? commits : [];
     return {
       repoId: r.id,
       name: r.name,
       repoUrl: r.repoUrl,
-      commits: commits.map((c) => ({
+      commits: list.map((c) => ({
         sha: c.sha?.slice(0, 7),
         message: String(c.commit?.message || '').split('\n')[0],
         author: c.commit?.author?.name || c.author?.login || 'unknown',
@@ -259,13 +265,14 @@ export class SquadsService {
     const r = await this.getRepoEntity(squadId, repoId);
     const base = `/repos/${r.owner}/${r.repo}`;
     const [info, langs, contributors] = await Promise.all([
-      this.gh(base, r.token) as Promise<any>,
-      this.gh(`${base}/languages`, r.token) as Promise<Record<string, number>>,
-      this.gh(`${base}/contributors?per_page=100`, r.token) as Promise<any[]>,
+      this.gh(base, r.token).catch(() => ({})) as Promise<any>,
+      this.gh(`${base}/languages`, r.token).catch(() => ({})) as Promise<Record<string, number>>,
+      this.gh(`${base}/contributors?per_page=100`, r.token).catch(() => []) as Promise<any[]>,
     ]);
 
-    const totalBytes = Object.values(langs).reduce((a, b) => a + b, 0) || 1;
-    const stack = Object.entries(langs)
+    const validLangs = (langs && typeof langs === 'object' && !Array.isArray(langs)) ? langs : {};
+    const totalBytes = Object.values(validLangs).reduce((a, b) => a + b, 0) || 1;
+    const stack = Object.entries(validLangs)
       .sort((a, b) => b[1] - a[1])
       .map(([language, bytes]) => ({
         language,
@@ -298,7 +305,7 @@ export class SquadsService {
 
   /** Sum of a user's active allocations must stay <= 1.0 (BR-CHRO-02). */
   private async assertAllocationBudget(userId: string, extraAllocation: number, tx: Prisma.TransactionClient) {
-    await tx.$queryRaw(Prisma.sql`SELECT id FROM "User" WHERE id = ${userId}::uuid FOR UPDATE`);
+    await tx.$queryRaw(Prisma.sql`SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`);
     const agg = await tx.squadMembership.aggregate({
       where: { userId, leftAt: null },
       _sum: { allocation: true },
@@ -314,7 +321,7 @@ export class SquadsService {
   /** CPO adds a member (BR-CHRO-01..04). PM role requires allocation 1.0 and squad must not already have a PM. */
   async addMember(cpoUserId: string, squadId: string, dto: { userId: string; role: 'PM' | 'DEVELOPER'; allocation: number }) {
     return this.prisma.$transaction(async (tx) => {
-    await tx.$queryRaw(Prisma.sql`SELECT id FROM "Squad" WHERE id = ${squadId}::uuid FOR UPDATE`);
+    await tx.$queryRaw(Prisma.sql`SELECT id FROM "Squad" WHERE id = ${squadId} FOR UPDATE`);
     const squad = await tx.squad.findUnique({ where: { id: squadId } });
     if (!squad) throw new NotFoundException('Squad not found');
 
@@ -353,7 +360,7 @@ export class SquadsService {
   /** CPO removes a member; the squad pays the SWAP_FEE (BR-CHRO-20..22). */
   async removeMember(cpoUserId: string, squadId: string, userId: string, idempotencyKey: string) {
     const result = await this.prisma.$transaction(async (tx) => {
-    await tx.$queryRaw(Prisma.sql`SELECT id FROM "Squad" WHERE id = ${squadId}::uuid FOR UPDATE`);
+    await tx.$queryRaw(Prisma.sql`SELECT id FROM "Squad" WHERE id = ${squadId} FOR UPDATE`);
     const membership = await tx.squadMembership.findUnique({
       where: { userId_squadId: { userId, squadId } },
     });
@@ -401,7 +408,7 @@ export class SquadsService {
     if (dto.fromSquadId === dto.toSquadId) throw new BadRequestException('Source and destination squads identical');
     const result = await this.prisma.$transaction(async (tx) => {
     const squadIds = [dto.fromSquadId, dto.toSquadId].sort();
-    for (const id of squadIds) await tx.$queryRaw(Prisma.sql`SELECT id FROM "Squad" WHERE id = ${id}::uuid FOR UPDATE`);
+    for (const id of squadIds) await tx.$queryRaw(Prisma.sql`SELECT id FROM "Squad" WHERE id = ${id} FOR UPDATE`);
     const membership = await tx.squadMembership.findUnique({
       where: { userId_squadId: { userId: dto.userId, squadId: dto.fromSquadId } },
     });

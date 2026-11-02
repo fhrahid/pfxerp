@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import { Toaster } from "sonner";
 import { Providers } from "./providers";
@@ -9,6 +9,13 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 export const metadata: Metadata = {
   title: "Pointfex ERP",
   description: "Pointfex Venture Studio — From an idea to a greater impact",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  themeColor: "#0b0f17",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

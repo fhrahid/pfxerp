@@ -48,16 +48,24 @@
   * {
     @apply border-border;
   }
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
   body {
     @apply bg-background text-foreground antialiased;
     font-feature-settings: "rlig" 1, "calt" 1;
+    overflow-x: hidden;
+    min-height: 100vh;
   }
 }
 
-/* thin scrollbars for the kanban */
+/* thin scrollbars for kanban, tables and modals */
+.thin-scroll {
+  -webkit-overflow-scrolling: touch;
+}
 .thin-scroll::-webkit-scrollbar {
-  height: 8px;
-  width: 8px;
+  height: 6px;
+  width: 6px;
 }
 .thin-scroll::-webkit-scrollbar-thumb {
   @apply rounded-full bg-border;

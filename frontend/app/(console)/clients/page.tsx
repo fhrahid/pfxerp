@@ -44,11 +44,11 @@ export default function ClientsPage() {
 
       {(contracts.data || []).map((c) => (
         <Card key={c.id}>
-          <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
+          <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3">
             <CardTitle className="text-base">
               {c.title} <span className="ml-1 text-xs font-normal text-muted-foreground">{c.client?.companyName}</span>
             </CardTitle>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Badge variant={statusVariant(c.status)}>{c.status}</Badge>
               <Badge variant="success" className="px-3 py-1">{taka(c.escrowBalance)} escrow</Badge>
               <Badge variant="info" className="px-3 py-1">{taka(c.totalValue)} value</Badge>

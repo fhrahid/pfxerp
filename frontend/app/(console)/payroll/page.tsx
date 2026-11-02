@@ -62,11 +62,11 @@ export default function PayrollPage() {
         <div className="space-y-3">
           {proposals.data.map((p) => (
             <Card key={p.id}>
-              <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
+              <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3">
                 <CardTitle className="text-sm">
                   {p.squad?.name} · Lab {p.labNumber} · <span className="text-emerald-700">{taka(p.totalProposed)}</span>
                 </CardTitle>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <Badge variant={statusVariant(p.status)}>{p.status}</Badge>
                   {ROLES.isCPO(role) && p.status === "SUBMITTED" ? (
                     <>
@@ -84,9 +84,9 @@ export default function PayrollPage() {
                   ) : null}
                 </div>
               </CardHeader>
-              <CardContent className="space-y-1">
+              <CardContent className="space-y-1.5">
                 {p.lineItems.map((li: any) => (
-                  <div key={li.id} className="flex items-center gap-2 text-sm">
+                  <div key={li.id} className="flex flex-wrap items-center gap-2 text-sm">
                     <span className="font-medium">{li.user?.fullName || li.userId.slice(0, 8)}</span>
                     <Badge variant="muted">{li.tier}</Badge>
                     <span className="tabular-nums text-emerald-700">{taka(li.amount)}</span>
@@ -147,8 +147,8 @@ function CreateProposalButton({ squadOptions }: { squadOptions: { value: string;
     <>
       <Button size="sm" onClick={openDialog}>+ New proposal</Button>
       {open ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={(e) => e.target === e.currentTarget && setOpen(false)}>
-          <div className="max-h-[88vh] w-full max-w-lg overflow-y-auto rounded-xl border bg-background p-6 shadow-xl thin-scroll">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 sm:p-4" onClick={(e) => e.target === e.currentTarget && setOpen(false)}>
+          <div className="max-h-[88vh] w-full max-w-lg overflow-y-auto rounded-xl border bg-background p-4 sm:p-6 shadow-xl thin-scroll">
             <h3 className="text-lg font-bold">Distribute lab payroll (budget ৳10,000)</h3>
             <div className="mt-1 text-xs text-muted-foreground">Lab number</div>
             <input
@@ -160,28 +160,30 @@ function CreateProposalButton({ squadOptions }: { squadOptions: { value: string;
             />
             <div className="mt-4 space-y-3">
               {rows.map((r, i) => (
-                <div key={r.userId} className="grid grid-cols-[1fr_150px_90px] items-end gap-2">
-                  <div className="text-sm font-medium">{r.name}</div>
-                  <select
-                    className="h-9 rounded-md border border-input bg-card px-2 text-sm"
-                    value={r.tier}
-                    onChange={(e) => {
-                      const tier = e.target.value;
-                      setRows((prev) => prev.map((row, j) => (j === i ? { ...row, tier, amount: TIER_CAPS[tier] } : row)));
-                    }}
-                  >
-                    {Object.keys(TIER_CAPS).map((t) => (
-                      <option key={t} value={t}>{t} (≤ ৳{TIER_CAPS[t]})</option>
-                    ))}
-                  </select>
-                  <input
-                    type="number"
-                    min={0}
-                    max={3500}
-                    value={r.amount}
-                    onChange={(e) => setRows((prev) => prev.map((row, j) => (j === i ? { ...row, amount: Number(e.target.value) } : row)))}
-                    className="h-9 rounded-md border border-input bg-card px-2 text-sm tabular-nums"
-                  />
+                <div key={r.userId} className="flex flex-col sm:grid sm:grid-cols-[1fr_150px_90px] sm:items-center gap-1.5 sm:gap-2 rounded-lg border sm:border-0 p-2.5 sm:p-0 bg-muted/20 sm:bg-transparent">
+                  <div className="text-sm font-medium truncate">{r.name}</div>
+                  <div className="grid grid-cols-2 sm:contents gap-2">
+                    <select
+                      className="h-9 rounded-md border border-input bg-card px-2 text-sm"
+                      value={r.tier}
+                      onChange={(e) => {
+                        const tier = e.target.value;
+                        setRows((prev) => prev.map((row, j) => (j === i ? { ...row, tier, amount: TIER_CAPS[tier] } : row)));
+                      }}
+                    >
+                      {Object.keys(TIER_CAPS).map((t) => (
+                        <option key={t} value={t}>{t} (≤ ৳{TIER_CAPS[t]})</option>
+                      ))}
+                    </select>
+                    <input
+                      type="number"
+                      min={0}
+                      max={3500}
+                      value={r.amount}
+                      onChange={(e) => setRows((prev) => prev.map((row, j) => (j === i ? { ...row, amount: Number(e.target.value) } : row)))}
+                      className="h-9 rounded-md border border-input bg-card px-2 text-sm tabular-nums"
+                    />
+                  </div>
                 </div>
               ))}
             </div>

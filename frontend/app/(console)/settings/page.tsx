@@ -59,7 +59,7 @@ function SettingRow({ setting: s, onSaved }: { setting: any; onSaved: () => void
         <input
           value={value}
           onChange={(e) => setValue(e.target.value)}
-          className="h-8 w-56 rounded-md border border-input bg-card px-2.5 text-sm"
+          className="h-8 w-full min-w-[140px] max-w-xs rounded-md border border-input bg-card px-2.5 text-sm"
         />
       </TableCell>
       <TableCell className="text-right">

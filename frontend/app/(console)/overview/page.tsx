@@ -71,13 +71,13 @@ export default function OverviewPage() {
           ) : notices.data?.length ? (
             notices.data.slice(0, 5).map((n: any) => (
               <div key={n.id} className="flex items-center justify-between gap-3 rounded-lg border p-3">
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium">{n.title}</div>
-                  <div className="text-xs text-muted-foreground">
+                  <div className="truncate text-xs text-muted-foreground">
                     {n.category} · from {n.sender?.fullName} · {dt(n.createdAt)}
                   </div>
                 </div>
-                <Badge variant={statusVariant(n.status)}>{n.status}</Badge>
+                <Badge variant={statusVariant(n.status)} className="shrink-0">{n.status}</Badge>
               </div>
             ))
           ) : (

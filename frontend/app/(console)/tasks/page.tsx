@@ -55,9 +55,9 @@ export default function TasksPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3">
         <Select value={activeSquad || undefined} onValueChange={setSquadId}>
-          <SelectTrigger className="w-52">
+          <SelectTrigger className="w-full sm:w-56">
             <SelectValue placeholder="Select squad" />
           </SelectTrigger>
           <SelectContent>
@@ -74,7 +74,7 @@ export default function TasksPage() {
       {tasks.isLoading ? (
         <Skeleton className="h-72 w-full rounded-xl" />
       ) : (
-        <div className="thin-scroll grid grid-flow-col auto-cols-[minmax(210px,1fr)] gap-3 overflow-x-auto pb-3">
+        <div className="thin-scroll grid grid-flow-col auto-cols-[minmax(250px,1fr)] sm:auto-cols-[minmax(210px,1fr)] gap-3 overflow-x-auto pb-3">
           {COLUMNS.map((col) => (
             <div key={col} className="rounded-xl border bg-muted/40 p-2.5">
               <div className="mb-2 flex items-center justify-between px-1">
@@ -134,7 +134,7 @@ function TaskDetail({ id }: { id: string }) {
         <Badge variant={t.priority === "CRITICAL" ? "destructive" : "muted"}>{t.priority}</Badge>
       </div>
       {t.description ? <p className="text-sm text-muted-foreground">{t.description}</p> : null}
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-sm">
         <Row label="Assignee" value={t.assignedTo?.fullName || "—"} />
         <Row label="Squad" value={t.squad?.name} />
         <Row label="PR / commit" value={t.gitPrUrl || t.gitCommitHash || "—"} mono />

@@ -104,8 +104,8 @@ export default function FinancePage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">
-            Emergency loans <span className="ml-1 text-xs font-normal text-muted-foreground">treasury &lt; ৳15,000 · 15% interest · 2-of-3 board + CEO</span>
+          <CardTitle className="text-base flex flex-wrap items-center gap-1.5">
+            Emergency loans <span className="text-xs font-normal text-muted-foreground">treasury &lt; ৳15,000 · 15% interest · 2-of-3 board + CEO</span>
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -181,14 +181,14 @@ export default function FinancePage() {
       {execFinance && ledger.data ? (
         <Card>
           <CardHeader><CardTitle className="text-base">Ledger feed</CardTitle></CardHeader>
-          <CardContent className="space-y-1.5">
+          <CardContent className="space-y-2">
             {ledger.data.map((t) => {
               const amt = t.entries.filter((e: any) => e.direction === "DEBIT").reduce((a: number, e: any) => a + Number(e.amount), 0);
               return (
-                <div key={t.id} className="flex items-center gap-3 text-sm">
-                  <Badge variant="info">{t.referenceType}</Badge>
-                  <span className="tabular-nums text-emerald-700">{taka(amt)}</span>
-                  <span className="truncate text-muted-foreground">{t.description}</span>
+                <div key={t.id} className="flex flex-wrap sm:flex-nowrap items-center gap-2 sm:gap-3 text-sm rounded-lg border p-2.5 sm:p-0 sm:border-0">
+                  <Badge variant="info" className="shrink-0">{t.referenceType}</Badge>
+                  <span className="tabular-nums font-semibold text-emerald-700">{taka(amt)}</span>
+                  <span className="truncate text-muted-foreground min-w-0 flex-1">{t.description}</span>
                   <span className="ml-auto shrink-0 text-xs text-muted-foreground">{dt(t.createdAt)}</span>
                 </div>
               );
@@ -241,8 +241,8 @@ function NewPayoutButton() {
     <>
       <Button size="sm" onClick={() => setOpen(true)}>New sprint payout</Button>
       {open ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={(e) => e.target === e.currentTarget && setOpen(false)}>
-          <div className="w-full max-w-md rounded-xl border bg-background p-6 shadow-xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 sm:p-4" onClick={(e) => e.target === e.currentTarget && setOpen(false)}>
+          <div className="w-full max-w-md rounded-xl border bg-background p-4 sm:p-6 shadow-xl">
             <h3 className="text-lg font-bold">Rank the squads</h3>
             <p className="text-xs text-muted-foreground">Distribution: 50k / 35k / 25k / 20k / 15k / 5k — ranks must be unique.</p>
             <div className="mt-3 text-xs font-semibold text-muted-foreground">Sprint number</div>

@@ -64,9 +64,9 @@ export default function NoticesPage() {
         <div className="space-y-3">
           {notices.data.map((n) => (
             <Card key={n.id}>
-              <CardContent className="flex flex-wrap items-center justify-between gap-3 p-5">
+              <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4 sm:p-5">
                 <div className="min-w-0">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="font-semibold">{n.title}</span>
                     <Badge variant={n.category === "DISCIPLINARY" ? "destructive" : "info"}>{n.category}</Badge>
                     <Badge variant={statusVariant(n.status)}>{n.status}</Badge>

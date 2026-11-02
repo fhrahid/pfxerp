@@ -126,17 +126,17 @@ function SquadDetailButton({ squadId }: { squadId: string }) {
     <div>
       <Button size="sm" variant="outline" onClick={() => setOpen(true)}>Open</Button>
       {open ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={(e) => e.target === e.currentTarget && setOpen(false)}>
-          <div className="max-h-[88vh] w-full max-w-xl overflow-y-auto rounded-xl border bg-background p-6 shadow-xl thin-scroll">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 sm:p-4" onClick={(e) => e.target === e.currentTarget && setOpen(false)}>
+          <div className="max-h-[88vh] w-full max-w-xl overflow-y-auto rounded-xl border bg-background p-4 sm:p-6 shadow-xl thin-scroll">
             {detail.isLoading || !detail.data ? (
               <Skeleton className="h-48 w-full" />
             ) : (
               <>
-                <div className="mb-4 flex items-center justify-between">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
                   <h3 className="text-lg font-bold">Squad · {detail.data.name}</h3>
                   <Badge variant={statusVariant(detail.data.healthStatus)}>{detail.data.healthStatus}</Badge>
                 </div>
-                <div className="mb-4 flex gap-2">
+                <div className="mb-4 flex flex-wrap gap-2">
                   <Badge variant="success" className="px-3 py-1">{taka(detail.data.balance)} treasury</Badge>
                   <Badge variant="info" className="px-3 py-1">valuation {taka(detail.data.valuation)}</Badge>
                 </div>
@@ -255,8 +255,8 @@ function GitModal({ squadId, name, onClose }: { squadId: string; name: string; o
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-xl border bg-background p-6 shadow-xl thin-scroll">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 sm:p-4" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-xl border bg-background p-4 sm:p-6 shadow-xl thin-scroll">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="flex items-center gap-2 text-lg font-bold"><Github className="h-5 w-5" /> {name} repositories</h3>
           <Button size="sm" variant="ghost" onClick={onClose}>✕</Button>

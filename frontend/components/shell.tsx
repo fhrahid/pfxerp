@@ -22,6 +22,8 @@ import {
   Trophy,
   Settings,
   LogOut,
+  Menu,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn, taka } from "@/lib/utils";
@@ -111,6 +113,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const me = useMe();
   const sprint = useSprint();
   const role = me.data?.role || "";
+  const [mobileOpen, setMobileOpen] = React.useState(false);
+
+  React.useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
 
   const items = NAV.filter((n) => !n.roles || n.roles.includes(role));
   const initials = (me.data?.fullName || "?")
@@ -120,9 +127,97 @@ export function Shell({ children }: { children: React.ReactNode }) {
     .join("")
     .toUpperCase();
 
+  const userFooter = (
+    <div className="border-t p-3">
+      <div className="flex items-center gap-2.5">
+        <Avatar>
+          <AvatarFallback>{initials}</AvatarFallback>
+        </Avatar>
+        <div className="min-w-0 flex-1 leading-tight">
+          <div className="truncate text-sm font-semibold">{me.data?.fullName}</div>
+          <div className="text-[11px] font-medium text-primary">{role}</div>
+          <div className="text-xs font-bold text-emerald-700">{taka(me.data?.walletBalance)}</div>
+        </div>
+      </div>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="mt-2 w-full justify-start text-muted-foreground"
+        onClick={async () => {
+          await logout();
+          router.push("/");
+        }}
+      >
+        <LogOut className="h-4 w-4" /> Log out
+      </Button>
+    </div>
+  );
+
   return (
     <div className="flex min-h-screen">
-      <aside className="sticky top-0 flex h-screen w-60 shrink-0 flex-col border-r bg-card">
+      {/* Mobile Drawer Backdrop */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs md:hidden"
+          onClick={() => setMobileOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Mobile Drawer */}
+      <aside
+        className={cn(
+          "fixed inset-y-0 left-0 z-50 flex w-72 max-w-[85vw] flex-col border-r bg-card shadow-2xl transition-transform duration-200 ease-in-out md:hidden",
+          mobileOpen ? "translate-x-0" : "-translate-x-full",
+        )}
+      >
+        <div className="flex h-16 items-center justify-between border-b px-4">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-lg font-extrabold text-primary-foreground">
+              P
+            </div>
+            <div className="leading-tight">
+              <div className="text-sm font-bold tracking-wide">
+                POINTFEX <span className="text-primary">ERP</span>
+              </div>
+              <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Venture Studio</div>
+            </div>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-muted-foreground"
+            onClick={() => setMobileOpen(false)}
+            aria-label="Close menu"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+        <nav className="flex-1 space-y-0.5 overflow-y-auto p-2 thin-scroll">
+          {items.map((item) => {
+            const active = pathname.startsWith(item.href);
+            const Icon = item.icon;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={() => setMobileOpen(false)}
+                className={cn(
+                  "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                  active ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                )}
+              >
+                <Icon className="h-4 w-4" />
+                {item.label}
+              </Link>
+            );
+          })}
+        </nav>
+        {userFooter}
+      </aside>
+
+      {/* Desktop Sidebar */}
+      <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r bg-card md:flex">
         <div className="flex h-16 items-center gap-2.5 border-b px-5">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-lg font-extrabold text-primary-foreground">
             P
@@ -153,38 +248,29 @@ export function Shell({ children }: { children: React.ReactNode }) {
             );
           })}
         </nav>
-        <div className="border-t p-3">
-          <div className="flex items-center gap-2.5">
-            <Avatar>
-              <AvatarFallback>{initials}</AvatarFallback>
-            </Avatar>
-            <div className="min-w-0 flex-1 leading-tight">
-              <div className="truncate text-sm font-semibold">{me.data?.fullName}</div>
-              <div className="text-[11px] font-medium text-primary">{role}</div>
-              <div className="text-xs font-bold text-emerald-700">{taka(me.data?.walletBalance)}</div>
-            </div>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="mt-2 w-full justify-start text-muted-foreground"
-            onClick={async () => {
-              await logout();
-              router.push("/");
-            }}
-          >
-            <LogOut className="h-4 w-4" /> Log out
-          </Button>
-        </div>
+        {userFooter}
       </aside>
+
+      {/* Main Content Area */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-40 flex h-16 items-center justify-between gap-3 border-b bg-background/80 px-6 backdrop-blur">
-          <PageTitle pathname={pathname} />
-          <div className="flex items-center gap-2">
+        <header className="sticky top-0 z-40 flex h-16 items-center justify-between gap-2.5 border-b bg-background/90 px-3.5 sm:px-6 backdrop-blur">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 shrink-0 md:hidden text-foreground"
+              onClick={() => setMobileOpen(true)}
+              aria-label="Open navigation menu"
+            >
+              <Menu className="h-5 w-5" />
+            </Button>
+            <PageTitle pathname={pathname} />
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
             {ROLES.isExec(role) ? (
               <FormDialog
                 trigger={
-                  <Button variant="outline" size="sm" className="gap-1.5 font-semibold">
+                  <Button variant="outline" size="sm" className="gap-1.5 font-semibold text-xs sm:text-sm px-2.5 sm:px-3">
                     <Zap className="h-3.5 w-3.5 text-amber-500" />
                     Sprint {sprint.data?.sprintNumber ?? "—"}
                   </Button>
@@ -196,13 +282,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
                 onSubmit={(d) => sprint.setSprint(Number(d.sprintNumber))}
               />
             ) : (
-              <Badge variant="warning" className="px-3 py-1 text-xs">
+              <Badge variant="warning" className="px-2.5 sm:px-3 py-1 text-xs">
                 Sprint {sprint.data?.sprintNumber ?? "—"}
               </Badge>
             )}
           </div>
         </header>
-        <main className="flex-1 p-6">{children}</main>
+        <main className="flex-1 p-3.5 sm:p-6 min-w-0">{children}</main>
       </div>
     </div>
   );
@@ -232,9 +318,9 @@ function PageTitle({ pathname }: { pathname: string }) {
     .sort((a, b) => b.length - a.length)[0];
   const [title, subtitle] = titles[key] || ["Pointfex ERP", ""];
   return (
-    <div>
-      <h1 className="text-lg font-bold leading-tight">{title}</h1>
-      <p className="text-xs text-muted-foreground">{subtitle}</p>
+    <div className="min-w-0">
+      <h1 className="text-base sm:text-lg font-bold leading-tight truncate">{title}</h1>
+      <p className="hidden sm:block text-xs text-muted-foreground truncate">{subtitle}</p>
     </div>
   );
 }

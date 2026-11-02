@@ -64,7 +64,7 @@ export default function ChaosPage() {
         <div className="space-y-3">
           {events.data.map((e) => (
             <Card key={e.id}>
-              <CardContent className="p-5">
+              <CardContent className="p-4 sm:p-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
