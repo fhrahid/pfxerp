@@ -149,7 +149,7 @@ function loginView(msg) {
       </div>
       ${msg ? `<div class="login-error">${esc(msg)}</div>` : ''}
       <form id="login-form">
-        <label>Email<input name="email" type="email" required placeholder="you@pointfex.com" autocomplete="username"/></label>
+        <label>Email<input name="email" type="email" required placeholder="you@seu.edu.bd" autocomplete="username"/></label>
         <label>Password<input name="password" type="password" required autocomplete="current-password"/></label>
         <button class="btn primary" style="width:100%;justify-content:center;margin-top:6px" type="submit">Sign in to the studio</button>
       </form>
@@ -158,8 +158,13 @@ function loginView(msg) {
   document.getElementById('login-form').onsubmit = async (e) => {
     e.preventDefault();
     const fd = Object.fromEntries(new FormData(e.target).entries());
+    const email = (fd.email || '').trim().toLowerCase();
+    if (!/^[a-zA-Z0-9._%+-]+@seu\.edu\.bd$/.test(email)) {
+      loginView('Only @seu.edu.bd email addresses are authorized to log in.');
+      return;
+    }
     try {
-      const data = await rawApi('POST', '/auth/login', fd);
+      const data = await rawApi('POST', '/auth/login', { ...fd, email });
       S.token = data.accessToken; S.refreshToken = data.refreshToken; S.user = null;
       saveSession();
       await boot();
@@ -545,7 +550,7 @@ function uiCopy(text) {
 function uiUserCreate() {
   formModal('Create member profile', [
     { name: 'fullName', label: 'Full name', required: true, placeholder: 'Ayesha Rahman' },
-    { name: 'email', label: 'Email', type: 'text', hint: 'email', required: true, placeholder: 'ayesha@pointfex.dev' },
+    { name: 'email', label: 'Email', type: 'text', hint: 'email', required: true, placeholder: 'ayesha@seu.edu.bd' },
     { name: 'password', label: 'Temporary password (min 8 chars)', required: true, value: 'Pointfex-' + Math.random().toString(36).slice(2, 8) },
     { name: 'role', label: 'Role', type: 'select', options: ['DEVELOPER', 'PM', 'CFO', 'CTO', 'CPO', 'CEO'].map((r) => ({ value: r, label: r })) },
     { name: 'studentId', label: 'Student ID (optional)', placeholder: 'CSE034' },

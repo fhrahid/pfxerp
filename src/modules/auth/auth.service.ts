@@ -4,6 +4,7 @@ import * as bcrypt from 'bcryptjs';
 import { createHash, randomUUID } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppException } from '../../common/exceptions/app.exception';
+import { isAllowedEmailDomain } from '../../common/types';
 
 /**
  * Authentication engine (security.md §2): bcrypt(12) password hashing,
@@ -42,8 +43,13 @@ export class AuthService {
   }
 
   async login(email: string, password: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { email },
+    const normalizedEmail = (email || '').trim().toLowerCase();
+    if (!isAllowedEmailDomain(normalizedEmail)) {
+      throw new AppException('AUTH_INVALID_CREDENTIALS', 'Only @seu.edu.bd email addresses are authorized to log in.');
+    }
+
+    const user = await this.prisma.user.findFirst({
+      where: { email: { equals: normalizedEmail, mode: 'insensitive' } },
       include: { squadMemberships: { where: { leftAt: null } }, account: true },
     });
     if (!user || !user.isActive) {

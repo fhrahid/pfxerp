@@ -6,3 +6,4 @@ dist/
 # Agent skills installed locally
 .agents/
 skills-lock.json
+/plan

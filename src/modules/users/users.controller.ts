@@ -1,5 +1,6 @@
 import { Body, Controller, ForbiddenException, Get, Param, Patch, Post } from '@nestjs/common';
 import { IsBoolean, IsEmail, IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { UserRole } from '@prisma/client';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Roles, CurrentUser } from '../../common/decorators';
@@ -9,6 +10,7 @@ import { UsersService } from './users.service';
 
 class CreateUserDto {
   @IsEmail()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
   email: string;
 
   @IsString()
@@ -35,6 +37,7 @@ class UpdateUserDto {
 
   @IsOptional()
   @IsEmail()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
   email?: string;
 
   @IsOptional()

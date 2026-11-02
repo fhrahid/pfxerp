@@ -3,6 +3,7 @@ import { UserRole } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppException } from '../../common/exceptions/app.exception';
+import { isAllowedEmailDomain } from '../../common/types';
 
 export interface CreateUserDto {
   email: string;
@@ -43,8 +44,14 @@ export class UsersService {
   }
 
   async createUser(dto: CreateUserDto) {
-    const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
-    if (existing) throw new AppException('CONFLICT', `A user with email ${dto.email} already exists`);
+    const email = dto.email.trim().toLowerCase();
+    if (!isAllowedEmailDomain(email)) {
+      throw new AppException('VALIDATION_FAILED', 'Email must be an @seu.edu.bd address');
+    }
+    const existing = await this.prisma.user.findFirst({
+      where: { email: { equals: email, mode: 'insensitive' } },
+    });
+    if (existing) throw new AppException('CONFLICT', `A user with email ${email} already exists`);
     // Blank student IDs become NULL — Postgres UNIQUE allows many NULLs but only one ''
     const studentId = dto.studentId?.trim() || null;
     if (studentId) {
@@ -55,7 +62,7 @@ export class UsersService {
     const passwordHash = await bcrypt.hash(dto.password, 12);
     const user = await this.prisma.user.create({
       data: {
-        email: dto.email,
+        email,
         fullName: dto.fullName,
         passwordHash,
         role: dto.role,
@@ -78,10 +85,16 @@ export class UsersService {
 
     // Blank student IDs become NULL — Postgres UNIQUE allows many NULLs but only one ''
     const studentId = dto.studentId === undefined ? undefined : dto.studentId?.trim() || null;
+    const email = dto.email !== undefined ? dto.email.trim().toLowerCase() : undefined;
 
-    if (dto.email && dto.email !== user.email) {
-      const clash = await this.prisma.user.findUnique({ where: { email: dto.email } });
-      if (clash) throw new AppException('CONFLICT', `A user with email ${dto.email} already exists`);
+    if (email && email !== user.email.toLowerCase()) {
+      if (!isAllowedEmailDomain(email)) {
+        throw new AppException('VALIDATION_FAILED', 'Email must be an @seu.edu.bd address');
+      }
+      const clash = await this.prisma.user.findFirst({
+        where: { email: { equals: email, mode: 'insensitive' } },
+      });
+      if (clash) throw new AppException('CONFLICT', `A user with email ${email} already exists`);
     }
     if (studentId && studentId !== user.studentId) {
       const clash = await this.prisma.user.findUnique({ where: { studentId } });
@@ -92,7 +105,7 @@ export class UsersService {
       where: { id: userId },
       data: {
         ...(dto.fullName ? { fullName: dto.fullName } : {}),
-        ...(dto.email ? { email: dto.email } : {}),
+        ...(email !== undefined ? { email } : {}),
         ...(dto.role ? { role: dto.role } : {}),
         ...(studentId !== undefined ? { studentId } : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),

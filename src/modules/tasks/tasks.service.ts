@@ -28,7 +28,7 @@ export class TasksService {
     private readonly chaos: ChaosService,
     private readonly audit: AuditService,
     private readonly settings: SettingsService,
-  ) {}
+  ) { }
 
   private assertTransition(task: Task, to: TaskStatus) {
     if (!ALLOWED[task.status].includes(to)) {
@@ -359,7 +359,7 @@ export class TasksService {
     if (task.assignedToId === user.id) {
       throw new ForbiddenException('Self-verification conflict: escalate to CTO or peer PM (pm.md §9.1)');
     }
-    const updated = await this.transition(task, TaskStatus.PM_VERIFIED, user.id, comment, {
+    return this.transition(task, TaskStatus.PM_VERIFIED, user.id, comment, {
       pmVerifiedById: user.id,
       pmVerifiedAt: new Date(),
       pmFeedback: comment,
@@ -367,10 +367,6 @@ export class TasksService {
       ctoVerifiedAt: null,
       ctoQualityPassed: null,
     });
-    if (updated.assignedToId) {
-      await this.recomputeDevDpi(updated.assignedToId, task.sprintNumber ?? undefined);
-    }
-    return updated;
   }
 
   /** FLAGGED_COMPLETE -> IN_PROGRESS with premature-flag penalty (BR-PM-04, BR-DEV-05..07). */

@@ -22,3 +22,11 @@ export function isBoardRole(role: UserRole): boolean {
 export function isOverrideRole(role: UserRole): boolean {
   return role === UserRole.CEO || role === UserRole.CTO || role === UserRole.CPO;
 }
+
+/** Enforces strictly @seu.edu.bd email domain for authentication and registration. */
+export function isAllowedEmailDomain(email: string): boolean {
+  if (!email || typeof email !== 'string') return false;
+  const normalized = email.trim().toLowerCase();
+  return /^[a-zA-Z0-9._%+-]+@seu\.edu\.bd$/.test(normalized);
+}
+

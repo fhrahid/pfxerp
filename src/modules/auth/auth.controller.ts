@@ -1,5 +1,6 @@
 import { Body, Controller, Get, HttpCode, Post } from '@nestjs/common';
 import { IsEmail, IsNotEmpty, IsString } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { ApiTags } from '@nestjs/swagger';
 import { Public, CurrentUser } from '../../common/decorators';
 import { AuthService } from './auth.service';
@@ -7,11 +8,12 @@ import { AuthUser } from '../../common/types';
 import { PrismaService } from '../../prisma/prisma.service';
 
 class LoginDto {
-  @IsEmail()
+  @IsEmail({}, { message: 'Must be a valid email address' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
   email: string;
 
   @IsString()
-  @IsNotEmpty()
+  @IsNotEmpty({ message: 'Password is required' })
   password: string;
 }
 
