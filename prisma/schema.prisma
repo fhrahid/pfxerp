@@ -209,6 +209,13 @@ enum SprintPayoutStatus {
   EXECUTED
 }
 
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  REVOKED
+}
+
 // ==========================================
 // MODELS
 // ==========================================
@@ -219,7 +226,7 @@ model User {
   passwordHash     String
   fullName         String
   studentId        String?        @unique
-  role             UserRole
+  role             String         @default("DEVELOPER") @db.VarChar(50)
   isActive         Boolean        @default(true)
   publicKey        String?        @db.Text
   refreshTokenHash String?
@@ -257,6 +264,8 @@ model User {
   executiveAuditLogs      ExecutiveAuditLog[]        @relation("AuditActor")
   dpiSnapshots            DeveloperPerformanceSnapshot[]
   pmhiSnapshots           PmPerformanceSnapshot[]
+  sentInvitations         Invitation[]               @relation("InvitationSender")
+  passwordResets          PasswordReset[]            @relation("UserPasswordResets")
 }
 
 model Squad {
@@ -925,4 +934,47 @@ model ExecutiveAuditLog {
   @@index([executiveRole])
   @@index([riskSeverity])
   @@index([createdAt])
+}
+
+model Invitation {
+  id            String           @id @default(uuid())
+  email         String
+  role          String           @default("DEVELOPER") @db.VarChar(50)
+  tokenHash     String           @unique
+  status        InvitationStatus @default(PENDING)
+  expiresAt     DateTime
+  invitedById   String
+  invitedBy     User             @relation("InvitationSender", fields: [invitedById], references: [id], onDelete: Cascade)
+  targetSquadId String?
+  acceptedAt    DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  @@index([email])
+  @@index([status])
+  @@index([expiresAt])
+}
+
+model PasswordReset {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation("UserPasswordResets", fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique @db.VarChar(50)
+  description String?  @db.VarChar(255)
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([name])
 }

@@ -182,7 +182,7 @@ export class ConsultancyService {
     });
   }
 
-  private async roleOf(userId: string): Promise<UserRole> {
+  private async roleOf(userId: string): Promise<string> {
     const u = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!u) throw new NotFoundException('Consultant not found');
     return u.role;

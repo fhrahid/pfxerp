@@ -18,7 +18,7 @@ export class SquadsService {
     private readonly settings: SettingsService,
   ) {}
 
-  async listSquads(user: { id: string; role: UserRole; squadIds: string[] }) {
+  async listSquads(user: { id: string; role: string; squadIds: string[] }) {
     const isExec = isExecRole(user.role);
     const squads = await this.prisma.squad.findMany({
       where: {
@@ -40,7 +40,7 @@ export class SquadsService {
     }));
   }
 
-  async getSquad(user: { id: string; role: UserRole; squadIds: string[] }, squadId: string) {
+  async getSquad(user: { id: string; role: string; squadIds: string[] }, squadId: string) {
     const isExec = isExecRole(user.role);
     if (!isExec && !user.squadIds.includes(squadId)) {
       throw new ForbiddenException('AUTHZ_CROSS_SQUAD');
@@ -135,7 +135,7 @@ export class SquadsService {
     return m ? { owner: m[1], repo: m[2] } : null;
   }
 
-  private async assertSquadManager(user: { id: string; role: UserRole }, squadId: string) {
+  private async assertSquadManager(user: { id: string; role: string }, squadId: string) {
     if (isExecRole(user.role)) return;
     const m = await this.prisma.squadMembership.findFirst({
       where: { userId: user.id, squadId, role: 'PM', leftAt: null },
@@ -143,7 +143,7 @@ export class SquadsService {
     if (!m) throw new ForbiddenException('Only the squad PM or a C-level executive may manage the squad repository');
   }
 
-  private async assertSquadMemberOrExec(user: { id: string; role: UserRole }, squadId: string) {
+  private async assertSquadMemberOrExec(user: { id: string; role: string }, squadId: string) {
     if (isExecRole(user.role)) return;
     const m = await this.prisma.squadMembership.findFirst({
       where: { userId: user.id, squadId, leftAt: null },
@@ -152,7 +152,7 @@ export class SquadsService {
   }
 
   /** Connect (or replace) the squad's GitHub repository. PM of the squad or C-level. */
-  async setGithubRepo(user: { id: string; role: UserRole }, squadId: string, dto: { repoUrl: string; token?: string }) {
+  async setGithubRepo(user: { id: string; role: string }, squadId: string, dto: { repoUrl: string; token?: string }) {
     await this.assertSquadManager(user, squadId);
     if (!this.parseGithubUrl(dto.repoUrl)) {
       throw new BadRequestException('Invalid GitHub repository URL — expected https://github.com/<owner>/<repo>');
@@ -165,7 +165,7 @@ export class SquadsService {
   }
 
   /** Recent commits for the squad's repo. Squad members and C-level. */
-  async githubActivity(user: { id: string; role: UserRole }, squadId: string) {
+  async githubActivity(user: { id: string; role: string }, squadId: string) {
     await this.assertSquadMemberOrExec(user, squadId);
     const squad = await this.prisma.squad.findUnique({ where: { id: squadId } });
     if (!squad) throw new NotFoundException('Squad not found');
@@ -380,7 +380,7 @@ export class SquadsService {
     return m;
   }
 
-  async assertSquadPMOrExec(userId: string, role: UserRole, squadId: string) {
+  async assertSquadPMOrExec(userId: string, role: string, squadId: string) {
     if (isOverrideRole(role)) return;
     const m = await this.prisma.squadMembership.findFirst({ where: { userId, squadId, role: 'PM', leftAt: null } });
     if (!m) throw new ForbiddenException('Only the squad PM or an executive may perform this action');

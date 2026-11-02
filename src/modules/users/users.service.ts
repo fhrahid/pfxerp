@@ -9,14 +9,14 @@ export interface CreateUserDto {
   email: string;
   fullName: string;
   password: string;
-  role: UserRole;
+  role: string;
   studentId?: string;
 }
 
 export interface UpdateUserDto {
   fullName?: string;
   email?: string;
-  role?: UserRole;
+  role?: string;
   studentId?: string | null;
   isActive?: boolean;
   password?: string;
@@ -31,7 +31,7 @@ export interface UpdateUserDto {
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private safe(user: { id: string; email: string; fullName: string; role: UserRole; studentId: string | null; isActive: boolean }) {
+  private safe(user: { id: string; email: string; fullName: string; role: string; studentId: string | null; isActive: boolean }) {
     return {
       id: user.id,
       email: user.email,

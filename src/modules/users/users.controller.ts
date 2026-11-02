@@ -21,8 +21,8 @@ class CreateUserDto {
   @MinLength(8)
   password: string;
 
-  @IsEnum(UserRole)
-  role: UserRole;
+  @IsString()
+  role: string;
 
   @IsOptional()
   @IsString()
@@ -41,8 +41,8 @@ class UpdateUserDto {
   email?: string;
 
   @IsOptional()
-  @IsEnum(UserRole)
-  role?: UserRole;
+  @IsString()
+  role?: string;
 
   @IsOptional()
   @IsString()

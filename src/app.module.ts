@@ -30,6 +30,9 @@ import { ConsultancyModule } from './modules/consultancy/consultancy.module';
 import { ClientsModule } from './modules/clients/clients.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { TelemetryModule } from './modules/telemetry/telemetry.module';
+import { MailModule } from './modules/mail/mail.module';
+import { InvitationsModule } from './modules/invitations/invitations.module';
+import { RolesModule } from './modules/roles/roles.module';
 
 @Module({
   imports: [
@@ -37,8 +40,11 @@ import { TelemetryModule } from './modules/telemetry/telemetry.module';
     PrismaModule,
     EventsModule,
     SettingsModule,
+    MailModule,
     // Business modules
     AuthModule,
+    RolesModule,
+    InvitationsModule,
     UsersModule,
     SquadsModule,
     LedgerModule,
