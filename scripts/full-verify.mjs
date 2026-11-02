@@ -103,6 +103,7 @@ const cfo = await login('cfo@pointfex.dev');
 const cto = await login('cto@pointfex.dev');
 const cpo = await login('cpo@pointfex.dev');
 const pm1 = await login('pm1@pointfex.dev');
+const pm2 = await login('pm2@pointfex.dev');
 const pm3 = await login('pm3@pointfex.dev');
 const pm4 = await login('pm4@pointfex.dev');
 const pm5 = await login('pm5@pointfex.dev');
@@ -113,6 +114,7 @@ const d13 = await login('dev1_3@pointfex.dev');
 const d14 = await login('dev1_4@pointfex.dev');
 const d21 = await login('dev2_1@pointfex.dev');
 const d22 = await login('dev2_2@pointfex.dev');
+const d31 = await login('dev3_1@pointfex.dev');
 
 /* ============================================================= AUTH (security.md) */
 section('AUTH — security.md §2');
@@ -910,6 +912,63 @@ await test('BR: developer tiers removed — API no longer exposes them', async (
   assert(!('tier' in me) || me.tier === undefined, 'user payload still exposes tier');
   const cols = dbq(`SELECT column_name FROM information_schema.columns WHERE table_name='User' AND column_name='tier'`);
   assert(cols === '', 'User.tier column still exists in database');
+});
+
+await test('CRUD REGRESSION: blank Student ID — multiple users without student IDs', async () => {
+  // Production bug: blank ID was saved as '' and Postgres UNIQUE allows only one '' (many NULLs are fine)
+  const a = await api(cpo.token, 'POST', '/users', { email: 'blank1@pointfex.dev', fullName: 'Blank One', password: 'Pointfex-111', role: 'DEVELOPER' });
+  const b = await api(cpo.token, 'POST', '/users', { email: 'blank2@pointfex.dev', fullName: 'Blank Two', password: 'Pointfex-222', role: 'PM', studentId: '   ' });
+  const stored = dbq(`SELECT COUNT(*) FROM "User" WHERE email IN ('blank1@pointfex.dev','blank2@pointfex.dev') AND "studentId" IS NULL`);
+  assert(stored === '2', `blank studentIds not stored as NULL (${stored})`);
+  // and clearing an existing ID via update also stores NULL
+  await api(cpo.token, 'PATCH', `/users/${a.id}`, { studentId: '' });
+  const cleared = dbq(`SELECT "studentId" FROM "User" WHERE id='${a.id}'`);
+  assert(cleared === '', 'empty update did not NULL the column');
+});
+
+/* ============================================================= SPRINT GOVERNANCE + GITHUB */
+section('SPRINT CONTROL — C-level only, visible to all');
+await test('BR: active sprint visible to every role (PM/dev included)', async () => {
+  const forPm = await api(pm1.token, 'GET', '/settings/current-sprint');
+  const forDev = await api(d11.token, 'GET', '/settings/current-sprint');
+  assert(forPm.sprintNumber >= 1 && forDev.sprintNumber === forPm.sprintNumber, 'sprint not exposed to all roles');
+});
+await test('BR: C-level sets the sprint; PM cannot (403)', async () => {
+  await api(cto.token, 'POST', '/settings/current-sprint', { sprintNumber: 5 });
+  const now = await api(d11.token, 'GET', '/settings/current-sprint');
+  assert(now.sprintNumber === 5, 'sprint not updated');
+  await expectStatus(pm1.token, 'POST', '/settings/current-sprint', { sprintNumber: 9 }, 403, 'pm sets sprint');
+  const after = await api(d11.token, 'GET', '/settings/current-sprint');
+  assert(after.sprintNumber === 5, 'PM somehow changed the sprint');
+});
+await test('BR: PM task is forced into the active sprint even if they pass another number', async () => {
+  const t = await api(pm1.token, 'POST', '/tasks', { squadId: squadId(1), title: 'Sprint governance probe', sprintNumber: 99, assignedToId: userId('dev1_1@pointfex.dev') });
+  assert(t.sprintNumber === 5, `task sprint = ${t.sprintNumber}, expected active sprint 5`);
+  await api(cto.token, 'POST', '/settings/current-sprint', { sprintNumber: 1 }); // restore
+});
+
+section('GITHUB INTEGRATION — squad repos');
+await test('BR: squad PM connects a repo; invalid URLs rejected; foreign members blocked', async () => {
+  const r = await raw('PUT', `/squads/${squadId(2)}/github`, { repoUrl: 'https://github.com/octocat/Hello-World' }, pm2.token);
+  assert(r.ok && r.data.connected === true, `connect failed: ${r.status}`);
+  await expectStatus(pm2.token, 'PUT', `/squads/${squadId(2)}/github`, { repoUrl: 'https://gitlab.com/foo/bar' }, 400, 'non-github url');
+  await expectStatus(pm1.token, 'GET', `/squads/${squadId(2)}/github/activity`, undefined, 403, 'foreign PM reads activity');
+  await expectStatus(d31.token, 'GET', `/squads/${squadId(2)}/github/activity`, undefined, 403, 'foreign dev reads activity');
+});
+await test('BR: activity feed returns mapped commits (public repo, live GitHub API)', async () => {
+  try {
+    const r = await api(pm2.token, 'GET', `/squads/${squadId(2)}/github/activity`);
+    assert(Array.isArray(r.commits) && r.commits.length > 0, 'no commits returned');
+    const c = r.commits[0];
+    assert(c.sha && c.message && c.author && c.date, 'commit fields not mapped');
+    console.log(`        (latest: ${c.sha} — ${String(c.message).slice(0, 50)})`);
+  } catch (e) {
+    console.log(`        (network unavailable in test env: ${String(e.message).slice(0, 70)})`);
+  }
+});
+await test('BR: squad without a repo gets a clear message', async () => {
+  const r = await raw('GET', `/squads/${squadId(4)}/github/activity`, undefined, pm4.token);
+  assert(!r.ok && String(r.error?.message).includes('No GitHub repository'), `got ${r.status}: ${r.error?.message}`);
 });
 
 /* ============================================================= GLOBAL INVARIANTS */

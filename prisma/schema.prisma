@@ -263,6 +263,8 @@ model Squad {
   id              String            @id @default(uuid())
   name            String            @unique
   description     String?
+  githubRepoUrl   String?           @db.Text
+  githubToken     String?           @db.Text
   isActive        Boolean           @default(true)
   healthStatus    SquadHealthStatus @default(STABLE)
   valuation       Decimal           @default(100000.00) @db.Decimal(14, 2)

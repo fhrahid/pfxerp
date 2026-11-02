@@ -220,8 +220,14 @@ export class TasksService {
     const points = dto.storyPoints ?? 1;
     if (points < 1 || points > 13) throw new BadRequestException('Story points must be between 1 and 13');
 
+    // Sprint governance: the ACTIVE SPRINT is set by C-level only. PMs always
+    // work in the active sprint (they may reference sprints in titles/notes).
+    const sprintNumber = isOverrideRole(user.role)
+      ? (dto.sprintNumber ?? (await this.settings.currentSprint()))
+      : await this.settings.currentSprint();
+
     // BR-PM-01: TODO requires storyPoints + assignee; otherwise it lands in BACKLOG
-    const canTodo = Boolean(dto.assignedToId && dto.sprintNumber);
+    const canTodo = Boolean(dto.assignedToId && sprintNumber);
     const status: TaskStatus = canTodo ? TaskStatus.TODO : TaskStatus.BACKLOG;
 
     const task = await this.prisma.task.create({
@@ -231,7 +237,7 @@ export class TasksService {
         description: dto.description,
         storyPoints: points,
         priority: (dto.priority as any) || 'MEDIUM',
-        sprintNumber: dto.sprintNumber,
+        sprintNumber,
         assignedToId: dto.assignedToId,
         assignedById: user.id,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : null,

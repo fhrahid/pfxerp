@@ -231,7 +231,10 @@ function renderShell() {
     <main class="main">
       <header class="topbar">
         <div><h2>${TAB_TITLES[S.tab]?.[0] || ''}</h2><div class="sub">${TAB_TITLES[S.tab]?.[1] || ''}</div></div>
-        <div id="tab-actions" class="row"></div>
+        <div class="row">
+          <span id="sprint-chip" class="sprint-chip ${isExec() ? 'editable' : ''}" ${isExec() ? "title='Click to change the active sprint'" : ''} onclick="${isExec() ? "uiSetSprint()" : ''}">Sprint ${S.currentSprint ?? '—'}</span>
+          <div id="tab-actions" class="row"></div>
+        </div>
       </header>
       <div id="content"></div>
     </main>`;
@@ -242,6 +245,9 @@ const C = () => document.getElementById('content');
 
 async function render() {
   if (!S.user) return;
+  try { S.currentSprint = (await api('GET', '/settings/current-sprint')).sprintNumber; } catch { /* */ }
+  const chip = document.getElementById('sprint-chip');
+  if (chip) chip.textContent = 'Sprint ' + (S.currentSprint ?? '—');
   const views = {
     overview: viewOverview, kanban: viewKanban, squads: viewSquads, roster: viewRoster,
     payroll: viewPayroll, finance: viewFinance, governance: viewGovernance,
@@ -300,11 +306,20 @@ async function viewKanban() {
       ${byStatus[col].map((t) => `
         <div class="kcard" onclick="uiTaskDetail('${t.id}')">
           <div class="t">${esc(t.title)}</div>
-          <div class="m"><span>${t.storyPoints} pts</span><span>${esc(t.priority)}</span></div>
+          <div class="m"><span>${esc(t.priority)}</span></div>
           <div class="m"><span>${esc(t.assignedTo?.fullName || 'unassigned')}</span></div>
         </div>`).join('') || '<div class="muted" style="font-size:11.5px;padding:6px 2px">—</div>'}
     </div>`).join('')}
   </div>`;
+}
+
+function uiSetSprint() {
+  formModal('Set active sprint (C-level only)', [
+    { name: 'sprintNumber', label: 'Sprint number', type: 'number', value: S.currentSprint || 1, required: true },
+  ], 'Set sprint', async (d) => {
+    await api('POST', '/settings/current-sprint', { sprintNumber: +d.sprintNumber });
+    S.currentSprint = +d.sprintNumber;
+  });
 }
 
 function uiCreateTask() {
@@ -313,11 +328,8 @@ function uiCreateTask() {
     { name: 'squadId', label: 'Squad', type: 'select', options: squadOpts.map((s) => ({ value: s.id, label: s.name })), required: true },
     { name: 'title', label: 'Title', required: true },
     { name: 'description', label: 'Description', type: 'textarea' },
-    { name: 'storyPoints', label: 'Story points (1-13)', type: 'number', value: 3, required: true },
     { name: 'priority', label: 'Priority', type: 'select', options: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].map((p) => ({ value: p, label: p })), value: 'MEDIUM' },
-    { name: 'sprintNumber', label: 'Sprint number', type: 'number', value: 1 },
   ], 'Create', async (d) => {
-    d.storyPoints = +d.storyPoints; d.sprintNumber = +d.sprintNumber || undefined;
     const members = await api('GET', '/squads/' + d.squadId);
     const devOpts = members.members.filter((m) => m.role === 'DEVELOPER').map((m) => ({ value: m.userId, label: m.fullName }));
     if (devOpts.length) {
@@ -408,13 +420,49 @@ async function viewSquads() {
       <td>${money(s.valuation)}</td><td class="health-${s.healthStatus}">${statusBadge(s.healthStatus)}</td><td>${s.taskCount}</td>
       <td class="row">
         <button class="btn sm" onclick="uiSquadDetail('${s.id}')">Open</button>
+        <button class="btn sm" onclick="uiSquadGit('${s.id}')">Git</button>
         ${canManage() ? `<button class="btn sm ghost" onclick="uiSquadEdit('${s.id}','${esc(s.name)}','${esc(s.description || '')}',${s.isActive !== false})">Edit</button>` : ''}
       </td></tr>`).join('')}
   </table></div>`;
 }
 
-function uiSquadCreate() {
-  formModal('Create squad', [
+async function uiSquadGit(squadId) {
+  const squad = S.squads.find((s) => s.id === squadId);
+  const canConnect = isExec() || (isPM() && mySquads().some((s) => s.id === squadId));
+  openModal('GitHub · ' + esc(squad?.name || 'Squad'), `
+    <div id="git-body"><div class="empty">Loading repository activity…</div></div>
+    ${canConnect ? `<div class="modal-actions" style="justify-content:flex-start"><button class="btn primary" onclick="uiGitConnect('${squadId}')">Connect / change repository</button></div>` : '<div class="muted" style="font-size:11.5px;margin-top:8px">Only the squad PM or C-level can connect the repository.</div>'}`, true);
+  await refreshGitFeed(squadId);
+}
+
+async function refreshGitFeed(squadId) {
+  const body = document.getElementById('git-body');
+  if (!body) return;
+  try {
+    const r = await api('GET', `/squads/${squadId}/github/activity`);
+    body.innerHTML = `
+      <div class="muted" style="font-size:12px;margin-bottom:8px">${esc(r.repoUrl)} · <button class="btn sm ghost" onclick="refreshGitFeed('${squadId}')">↻ refresh</button></div>
+      ${r.commits.map((c) => `<div class="commit">
+        <div class="msg"><span class="sha">${esc(c.sha)}</span> ${esc(c.message)}</div>
+        <div class="meta">${esc(c.author)} · ${dt(c.date)}</div>
+      </div>`).join('') || '<div class="empty">No commits found</div>'}`;
+  } catch (e) {
+    body.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+  }
+}
+
+function uiGitConnect(squadId) {
+  formModal('Connect GitHub repository', [
+    { name: 'repoUrl', label: 'Repository URL', required: true, placeholder: 'https://github.com/pointfex/squad-1' },
+    { name: 'token', label: 'Personal Access Token (optional — needed for private repos)', placeholder: 'ghp_…' },
+  ], 'Connect', async (d) => {
+    await api('PUT', `/squads/${squadId}/github`, { repoUrl: d.repoUrl, token: d.token || undefined });
+    closeModal();
+    await uiSquadGit(squadId);
+  });
+}
+
+function uiSquadCreate() {  formModal('Create squad', [
     { name: 'name', label: 'Squad name', required: true, placeholder: 'Squad 7' },
     { name: 'description', label: 'Description', placeholder: 'Product engineering squad' },
     { name: 'initialBalance', label: 'Initial treasury (BDT, from system reserve)', type: 'number', value: 100000 },
@@ -501,7 +549,7 @@ function uiUserCreate() {
     { name: 'password', label: 'Temporary password (min 8 chars)', required: true, value: 'Pointfex-' + Math.random().toString(36).slice(2, 8) },
     { name: 'role', label: 'Role', type: 'select', options: ['DEVELOPER', 'PM', 'CFO', 'CTO', 'CPO', 'CEO'].map((r) => ({ value: r, label: r })) },
     { name: 'studentId', label: 'Student ID (optional)', placeholder: 'CSE034' },
-  ], 'Create profile', (d) => api('POST', '/users', d));
+  ], 'Create profile', (d) => api('POST', '/users', { ...d, studentId: d.studentId || undefined }));
 }
 
 function uiUserEdit(id, fullName, email, role, studentId) {

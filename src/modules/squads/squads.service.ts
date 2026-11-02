@@ -127,6 +127,84 @@ export class SquadsService {
     });
   }
 
+  // ------------------------------------------------------------------
+  // GitHub integration: connect a squad repo and browse its activity
+  // ------------------------------------------------------------------
+  private parseGithubUrl(url: string): { owner: string; repo: string } | null {
+    const m = String(url || '').trim().match(/^(?:https?:\/\/)?(?:www\.)?github\.com\/([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i);
+    return m ? { owner: m[1], repo: m[2] } : null;
+  }
+
+  private async assertSquadManager(user: { id: string; role: UserRole }, squadId: string) {
+    if (isExecRole(user.role)) return;
+    const m = await this.prisma.squadMembership.findFirst({
+      where: { userId: user.id, squadId, role: 'PM', leftAt: null },
+    });
+    if (!m) throw new ForbiddenException('Only the squad PM or a C-level executive may manage the squad repository');
+  }
+
+  private async assertSquadMemberOrExec(user: { id: string; role: UserRole }, squadId: string) {
+    if (isExecRole(user.role)) return;
+    const m = await this.prisma.squadMembership.findFirst({
+      where: { userId: user.id, squadId, leftAt: null },
+    });
+    if (!m) throw new ForbiddenException('AUTHZ_CROSS_SQUAD');
+  }
+
+  /** Connect (or replace) the squad's GitHub repository. PM of the squad or C-level. */
+  async setGithubRepo(user: { id: string; role: UserRole }, squadId: string, dto: { repoUrl: string; token?: string }) {
+    await this.assertSquadManager(user, squadId);
+    if (!this.parseGithubUrl(dto.repoUrl)) {
+      throw new BadRequestException('Invalid GitHub repository URL — expected https://github.com/<owner>/<repo>');
+    }
+    const updated = await this.prisma.squad.update({
+      where: { id: squadId },
+      data: { githubRepoUrl: dto.repoUrl.trim(), ...(dto.token !== undefined ? { githubToken: dto.token?.trim() || null } : {}) },
+    });
+    return { squadId, repoUrl: updated.githubRepoUrl, connected: true };
+  }
+
+  /** Recent commits for the squad's repo. Squad members and C-level. */
+  async githubActivity(user: { id: string; role: UserRole }, squadId: string) {
+    await this.assertSquadMemberOrExec(user, squadId);
+    const squad = await this.prisma.squad.findUnique({ where: { id: squadId } });
+    if (!squad) throw new NotFoundException('Squad not found');
+    if (!squad.githubRepoUrl) throw new BadRequestException('No GitHub repository connected to this squad yet');
+
+    const parsed = this.parseGithubUrl(squad.githubRepoUrl);
+    if (!parsed) throw new BadRequestException('Stored repository URL is invalid');
+
+    let res: Response;
+    try {
+      res = await fetch(`https://api.github.com/repos/${parsed.owner}/${parsed.repo}/commits?per_page=30`, {
+        headers: {
+          Accept: 'application/vnd.github+json',
+          'User-Agent': 'pointfex-erp',
+          ...(squad.githubToken ? { Authorization: `Bearer ${squad.githubToken}` } : {}),
+        },
+        signal: AbortSignal.timeout(10000),
+      });
+    } catch (e) {
+      throw new BadRequestException(`Could not reach GitHub (${(e as Error).name}). Check server connectivity or use a token for private repos.`);
+    }
+    if (!res.ok) {
+      const body = (await res.text()).slice(0, 200);
+      throw new BadRequestException(`GitHub API ${res.status}: ${body}`);
+    }
+    const commits = (await res.json()) as any[];
+    return {
+      squadId,
+      repoUrl: squad.githubRepoUrl,
+      commits: commits.map((c) => ({
+        sha: c.sha?.slice(0, 7),
+        message: String(c.commit?.message || '').split('\n')[0],
+        author: c.commit?.author?.name || c.author?.login || 'unknown',
+        date: c.commit?.author?.date,
+        url: c.html_url,
+      })),
+    };
+  }
+
   /** Sum of a user's active allocations must stay <= 1.0 (BR-CHRO-02). */
   private async assertAllocationBudget(userId: string, extraAllocation: number, tx: Prisma.TransactionClient) {
     await tx.$queryRaw(Prisma.sql`SELECT id FROM "User" WHERE id = ${userId}::uuid FOR UPDATE`);
