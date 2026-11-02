@@ -48,4 +48,8 @@ USER nestjs
 
 EXPOSE 3000
 
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/src/main.js"]
+# Existing Dokploy databases were provisioned with Prisma db push and therefore
+# have no _prisma_migrations history. `migrate deploy` would try to replay the
+# initial migration over their existing tables, exit, and leave Traefik at 502.
+# db push is non-destructive by default and safely applies additive schema work.
+CMD ["sh", "-c", "npx prisma db push --skip-generate && node dist/src/main.js"]
