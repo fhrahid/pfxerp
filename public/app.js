@@ -79,6 +79,7 @@ function openModal(title, html, wide) {
     `<div class="overlay" onclick="if(event.target===this)closeModal()"><div class="modal${wide ? ' wide' : ''}"><div class="modal-head"><h3>${esc(title)}</h3><button class="icon-btn" onclick="closeModal()">✕</button></div>${html}</div></div>`;
 }
 function closeModal() { document.getElementById('modal-root').innerHTML = ''; }
+const modal = (title, html, wide = true) => openModal(title, html, wide);
 
 function formModal(title, fields, submitLabel, onSubmit, wide, extraHtml) {
   const body = fields.map((f) => {
@@ -492,6 +493,79 @@ async function viewOverview() {
       ${notices.slice(0, 4).map((n) => `<div class="list-item"><div class="top"><b>${esc(n.title)}</b>${statusBadge(n.status)}</div>
         <div class="muted" style="font-size:12px;margin-top:4px">${esc(n.category)} · from ${esc(n.sender?.fullName || '')} · ${dt(n.createdAt)}</div></div>`).join('') || '<div class="empty">No notices</div>'}</div>`;
   } catch { /* */ }
+
+  let ceoHtml = '';
+  if (isCEO()) {
+    try {
+      const ceoData = await api('GET', '/dashboard/ceo');
+      const macro = ceoData.macro || {};
+      const executives = ceoData.executives || [];
+      const actions = (ceoData.recentExecutiveActions || []).slice(0, 8);
+
+      ceoHtml = `
+        <div class="panel" style="margin-top:16px;border:1px solid rgba(234,179,8,0.3);">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <h3 style="margin:0;">Executive Audit & Collusion Alerts</h3>
+              <span class="badge b-gold" style="font-weight:bold;">CEO 360 Command Center</span>
+            </div>
+            <div class="muted" style="font-size:12px;">
+              Active Contracts: <b>${macro.activeClientContracts ?? 0}</b> · Studio Valuation: <b class="money">${money(macro.studioValuation)}</b> · Escrow: <b class="money">${money(macro.activeEscrow)}</b>
+            </div>
+          </div>
+
+          <h4 style="margin:12px 0 8px;">Executive Oversight & Anomaly Detection</h4>
+          <table>
+            <tr>
+              <th>Executive</th>
+              <th>Role</th>
+              <th>Wallet Balance</th>
+              <th>Audited Actions</th>
+              <th>Collusion / Anomaly Flags</th>
+              <th>Profile</th>
+            </tr>
+            ${executives.map((e) => {
+              const hasFlags = e.anomalyFlags && e.anomalyFlags.length > 0;
+              return `<tr>
+                <td><b>${esc(e.name)}</b></td>
+                <td>${statusBadge(e.role)}</td>
+                <td class="money">${money(e.walletBalance || 0)}</td>
+                <td><b>${e.actionCount || 0}</b> actions</td>
+                <td>
+                  ${hasFlags
+                    ? e.anomalyFlags.map((f) => `<span class="badge b-red" style="font-weight:bold;margin-right:4px;">⚠️ ${esc(f)}</span>`).join('')
+                    : '<span class="badge b-green">NORMAL</span>'}
+                </td>
+                <td><button class="btn sm" onclick="uiUserProfile('${e.id}')">Profile</button></td>
+              </tr>`;
+            }).join('') || '<tr><td colspan="6" class="muted">No executives registered</td></tr>'}
+          </table>
+
+          <h4 style="margin:16px 0 8px;">Recent Executive Actions Stream</h4>
+          <div style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;">
+            <table>
+              <tr><th>Timestamp</th><th>Actor</th><th>Role</th><th>Action Type</th><th>Severity</th><th>Payload Snapshot</th></tr>
+              ${actions.map((a) => {
+                const sevClass = a.riskSeverity === 'HIGH' ? 'b-red' : a.riskSeverity === 'MEDIUM' ? 'b-yellow' : 'b-blue';
+                const payloadStr = a.payload ? (typeof a.payload === 'object' ? JSON.stringify(a.payload) : String(a.payload)) : '';
+                return `<tr>
+                  <td class="mono" style="font-size:11px;">${dt(a.createdAt)}</td>
+                  <td><b>${esc(a.executiveName)}</b></td>
+                  <td>${statusBadge(a.executiveRole)}</td>
+                  <td><b>${esc(a.actionType)}</b></td>
+                  <td><span class="badge ${sevClass}" style="font-weight:bold;">${esc(a.riskSeverity || 'LOW')}</span></td>
+                  <td class="mono" style="font-size:11px;" title="${esc(payloadStr)}">${esc(payloadStr.slice(0, 70))}${payloadStr.length > 70 ? '…' : ''}</td>
+                </tr>`;
+              }).join('') || '<tr><td colspan="6" class="muted" style="padding:12px;text-align:center;">No recent executive actions logged</td></tr>'}
+            </table>
+          </div>
+        </div>
+      `;
+    } catch (e) {
+      console.error('Failed to load CEO dashboard data:', e);
+    }
+  }
+
   C().innerHTML = `
     <div class="cards">
       <div class="card"><div class="k">My Wallet</div><div class="v money">${money(me.walletBalance)}</div></div>
@@ -499,6 +573,7 @@ async function viewOverview() {
       <div class="card"><div class="k">Latest DPI</div><div class="v">${me.latestDpi ?? '—'}</div></div>
       <div class="card"><div class="k">My Squads</div><div class="v">${me.squads?.length || 0}</div></div>
     </div>
+    ${ceoHtml}
     ${me.squads?.length ? `<div class="panel"><h3>My squads</h3><table><tr><th>Squad</th><th>Treasury</th><th>Health</th></tr>
       ${me.squads.map((s) => `<tr><td>${esc(s.name)}</td><td class="money">${money(s.balance)}</td><td class="health-${s.health}">${statusBadge(s.health)}</td></tr>`).join('')}</table></div>` : ''}
     ${noticesHtml}`;
@@ -520,24 +595,28 @@ async function viewKanban() {
     <select class="inp" onchange="S.kanbanSquad=this.value;render()">
       ${squadOpts.map((s) => `<option value="${s.id}" ${s.id === S.kanbanSquad ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
     </select>
-    ${isPM() || isExec() ? '<button class="btn primary" onclick="uiCreateTask()">+ New task</button>' : ''}`);
+    ${isPM() || isExec() ? `<button class="btn primary" onclick="uiTaskCreate('${S.kanbanSquad}')">+ New task</button>` : ''}`);
 
   C().innerHTML = `<div class="kanban">${KANBAN_COLS.map((col) => `
     <div class="kcol"><h4><span>${col.replace('_', ' ')}</span><span>${byStatus[col].length}</span></h4>
-      ${byStatus[col].map((t) => `
+      ${byStatus[col].map((t) => {
+        const isMissed = t.isOverdue || (t.dueDate && new Date(t.dueDate) < new Date() && t.status !== 'CLOSED');
+        return `
         <div class="kcard" onclick="uiTaskDetail('${t.id}')">
           <div class="t">${esc(t.title)}</div>
           <div class="m">
             <span class="badge-sp">${t.storyPoints ? t.storyPoints + ' SP' : '—'}</span>
             <span class="badge-prio prio-${esc(t.priority)}">${esc(t.priority)}</span>
             ${t.gitPrUrl ? '<span title="Git PR Verified" style="color:var(--accent2);font-weight:700;">● PR</span>' : ''}
-            ${t.dueDate && !['CTO_VERIFIED','CLOSED'].includes(t.status) && new Date(t.dueDate) < new Date() ? '<span class="badge b-red" style="font-size:10px;padding:1px 4px;">⚠️ Overdue</span>' : (t.dueDate ? `<span class="muted" style="font-size:10px;">Due: ${dt(t.dueDate).slice(0, 10)}</span>` : '')}
+            ${isMissed ? '<span class="badge b-red" style="font-weight:bold;margin-left:4px">MISSED DEADLINE</span>' : ''}
           </div>
+          ${t.dueDate ? `<div class="muted" style="font-size:11px">Due: ${dt(t.dueDate)}</div>` : ''}
           <div class="m" style="font-size:11.5px;color:var(--muted);justify-content:space-between;">
             <span>${esc(t.assignedTo?.fullName || 'unassigned')}</span>
             ${t.squad ? `<span style="opacity:0.75;">${esc(t.squad.name)}</span>` : ''}
           </div>
-        </div>`).join('') || '<div class="muted" style="font-size:11.5px;padding:6px 2px">—</div>'}
+        </div>`;
+      }).join('') || '<div class="muted" style="font-size:11.5px;padding:6px 2px">—</div>'}
     </div>`).join('')}
   </div>`;
 }
@@ -551,30 +630,100 @@ function uiSetSprint() {
   });
 }
 
-function uiCreateTask() {
+async function uiTaskCreate(squadId) {
   const squadOpts = isExec() ? S.squads : mySquads();
-  formModal('Create task', [
-    { name: 'squadId', label: 'Squad', type: 'select', options: squadOpts.map((s) => ({ value: s.id, label: s.name })), required: true },
-    { name: 'title', label: 'Title', required: true },
-    { name: 'description', label: 'Description', type: 'textarea' },
-    { name: 'priority', label: 'Priority', type: 'select', options: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].map((p) => ({ value: p, label: p })), value: 'MEDIUM' },
-    { name: 'dueDate', label: 'Due date / Deadline', type: 'date' },
-  ], 'Create', async (d) => {
-    if (d.dueDate) d.dueDate = new Date(d.dueDate).toISOString();
-    const members = await api('GET', '/squads/' + d.squadId);
-    const devOpts = members.members.filter((m) => m.role === 'DEVELOPER').map((m) => ({ value: m.userId, label: m.fullName }));
-    if (devOpts.length) {
-      formModal('Assign developer', [
-        { name: 'assignedToId', label: 'Assignee', type: 'select', options: [{ value: '', label: '— leave in backlog —' }, ...devOpts] },
-      ], 'Assign', async (d2) => {
-        if (d2.assignedToId) d.assignedToId = d2.assignedToId;
-        await api('POST', '/tasks', d);
-      });
-    } else {
-      await api('POST', '/tasks', d);
+  if (!squadOpts.length) { toast('No squad membership', false); return; }
+  const activeSquadId = squadId || S.kanbanSquad || squadOpts[0].id;
+
+  let devOpts = [];
+  try {
+    const squadDetail = await api('GET', '/squads/' + activeSquadId);
+    devOpts = (squadDetail.members || []).filter((m) => m.role === 'DEVELOPER');
+  } catch (_) {}
+
+  const formHtml = `
+    <form id="taskCreateForm">
+      <div class="field">
+        <label>Squad</label>
+        <select id="tcSquad" name="squadId" onchange="uiTaskCreateSquadChange(this.value)">
+          ${squadOpts.map((s) => `<option value="${s.id}" ${s.id === activeSquadId ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field">
+        <label>Title</label>
+        <input type="text" id="tcTitle" name="title" required placeholder="Task title">
+      </div>
+      <div class="field">
+        <label>Description</label>
+        <textarea id="tcDesc" name="description" rows="3" placeholder="Task description and acceptance criteria"></textarea>
+      </div>
+      <div class="fieldrow">
+        <div class="field">
+          <label>Story Points (1-13)</label>
+          <input type="number" id="tcPoints" name="storyPoints" min="1" max="13" value="1" required>
+        </div>
+        <div class="field">
+          <label>Priority</label>
+          <select id="tcPriority" name="priority">
+            <option value="LOW">LOW</option>
+            <option value="MEDIUM" selected>MEDIUM</option>
+            <option value="HIGH">HIGH</option>
+            <option value="CRITICAL">CRITICAL</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label>Assignee</label>
+        <select id="tcAssignee" name="assignedToId">
+          <option value="">— Unassigned (Backlog) —</option>
+          ${devOpts.map((d) => `<option value="${d.userId}">${esc(d.fullName)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field"><label>Due Date & Time (Optional)</label><input type="datetime-local" id="tcDue"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn primary">Create Task</button>
+      </div>
+    </form>
+  `;
+
+  modal('Create Task', formHtml);
+
+  document.getElementById('taskCreateForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const dueVal = document.getElementById('tcDue')?.value;
+    const payload = {
+      squadId: document.getElementById('tcSquad')?.value,
+      title: document.getElementById('tcTitle')?.value,
+      description: document.getElementById('tcDesc')?.value || undefined,
+      storyPoints: +(document.getElementById('tcPoints')?.value || 1),
+      priority: document.getElementById('tcPriority')?.value || 'MEDIUM',
+      assignedToId: document.getElementById('tcAssignee')?.value || undefined,
+      dueDate: dueVal ? new Date(dueVal).toISOString() : undefined,
+    };
+    try {
+      await api('POST', '/tasks', payload);
+      closeModal();
+      toast('Task created successfully');
+      render();
+    } catch (err) {
+      toast(err.message || 'Failed to create task', false);
     }
-  });
+  };
 }
+
+async function uiTaskCreateSquadChange(squadId) {
+  const sel = document.getElementById('tcAssignee');
+  if (!sel) return;
+  try {
+    const squadDetail = await api('GET', '/squads/' + squadId);
+    const devOpts = (squadDetail.members || []).filter((m) => m.role === 'DEVELOPER');
+    sel.innerHTML = `<option value="">— Unassigned (Backlog) —</option>` +
+      devOpts.map((d) => `<option value="${d.userId}">${esc(d.fullName)}</option>`).join('');
+  } catch (_) {}
+}
+
+const uiCreateTask = uiTaskCreate;
 
 async function uiTaskDetail(id) {
   const t = await api('GET', '/tasks/' + id);
@@ -583,20 +732,44 @@ async function uiTaskDetail(id) {
   const canPm = t.status === 'FLAGGED_COMPLETE' && (isPM() || isCPO() || isCTO());
   const canCto = t.status === 'PM_VERIFIED' && isCTO();
   const canClose = t.status === 'CTO_VERIFIED' && (isPM() || isCTO());
-  const isOv = t.dueDate && !['CTO_VERIFIED','CLOSED'].includes(t.status) && new Date(t.dueDate) < new Date();
-  const isMissed = t.dueDate && ['CTO_VERIFIED','CLOSED'].includes(t.status) && (
+
+  const isCompleted = ['CTO_VERIFIED', 'CLOSED'].includes(t.status);
+  const isOv = t.isOverdue || (t.dueDate && !isCompleted && new Date(t.dueDate) < new Date());
+  const isCompletedLate = t.completedLate || (isCompleted && t.dueDate && (
     (t.ctoVerifiedAt && new Date(t.ctoVerifiedAt) > new Date(t.dueDate)) ||
-    (t.flaggedCompleteAt && new Date(t.flaggedCompleteAt) > new Date(t.dueDate))
-  );
+    (t.flaggedCompleteAt && new Date(t.flaggedCompleteAt) > new Date(t.dueDate)) ||
+    (t.updatedAt && new Date(t.updatedAt) > new Date(t.dueDate))
+  ));
+  const isCompletedOnTime = isCompleted && t.dueDate && !isCompletedLate;
+
+  let deadlineBadge = '';
+  let deadlineDesc = 'No deadline';
+  if (t.dueDate) {
+    if (isOv) {
+      deadlineBadge = '<span class="badge b-red" style="font-weight:bold;margin-left:4px">MISSED DEADLINE (OVERDUE)</span>';
+      deadlineDesc = '<span style="color:var(--danger);font-weight:bold">Overdue (Missed deadline)</span>';
+    } else if (isCompletedLate) {
+      deadlineBadge = '<span class="badge b-red" style="font-weight:bold;margin-left:4px">COMPLETED LATE</span>';
+      deadlineDesc = '<span style="color:var(--danger);font-weight:bold">Completed late</span>';
+    } else if (isCompletedOnTime) {
+      deadlineBadge = '<span class="badge b-green" style="font-weight:bold;margin-left:4px">COMPLETED ON TIME</span>';
+      deadlineDesc = '<span style="color:var(--success);font-weight:bold">Completed on time</span>';
+    } else {
+      deadlineBadge = '<span class="badge b-blue" style="margin-left:4px">ON TRACK</span>';
+      deadlineDesc = '<span class="muted">On track</span>';
+    }
+  }
 
   openModal(t.title, `
-    <div class="pillrow" style="margin-bottom:10px">${statusBadge(t.status)} ${badge(t.priority, t.priority === 'CRITICAL' ? 'b-red' : 'b-gray')} ${badge(t.storyPoints + ' pts', 'b-blue')} ${isOv ? '<span class="badge b-red">⚠️ OVERDUE</span>' : isMissed ? '<span class="badge b-red">MISSED DEADLINE</span>' : ''}</div>
+    <div class="pillrow" style="margin-bottom:10px">${statusBadge(t.status)} ${badge(t.priority, t.priority === 'CRITICAL' ? 'b-red' : 'b-gray')} ${badge(t.storyPoints + ' pts', 'b-blue')} ${deadlineBadge}</div>
     <p class="muted">${esc(t.description || 'No description')}</p>
     <table>
       <tr><td>Assignee</td><td>${esc(t.assignedTo?.fullName || '—')}</td></tr>
       <tr><td>Squad</td><td>${esc(t.squad?.name)}</td></tr>
       <tr><td>PR / Commit</td><td class="mono">${esc(t.gitPrUrl || t.gitCommitHash || '—')}</td></tr>
-      ${t.dueDate ? `<tr><td>Due date</td><td style="${isOv ? 'color:var(--danger);font-weight:700;' : ''}">${dt(t.dueDate)} ${isOv ? '⚠️ (OVERDUE)' : isMissed ? '(MISSED)' : ''}</td></tr>` : ''}
+      <tr><td>Due date</td><td>${t.dueDate ? `${dt(t.dueDate)} — ${deadlineDesc}` : '<span class="muted">No deadline set</span>'}</td></tr>
+      ${t.flaggedCompleteAt ? `<tr><td>Flagged Complete</td><td class="mono">${dt(t.flaggedCompleteAt)}</td></tr>` : ''}
+      ${t.ctoVerifiedAt ? `<tr><td>CTO Verified</td><td class="mono">${dt(t.ctoVerifiedAt)}</td></tr>` : ''}
       ${t.pmFeedback ? `<tr><td>PM feedback</td><td>${esc(t.pmFeedback)}</td></tr>` : ''}
       ${t.ctoCritique ? `<tr><td>CTO critique</td><td>${esc(t.ctoCritique)}</td></tr>` : ''}
       ${t.pmPenaltyPoints ? `<tr><td>Penalty points</td><td style="color:var(--danger)">-${t.pmPenaltyPoints}</td></tr>` : ''}
@@ -604,6 +777,7 @@ async function uiTaskDetail(id) {
     <h3 style="margin:14px 0 8px">Audit trail</h3>
     ${(t.auditEvents || []).slice(0, 8).map((a) => `<div class="muted" style="font-size:12px;padding:3px 0">${dt(a.createdAt)} — <b>${esc(a.changedBy?.fullName || '')}</b>: ${esc(a.fromStatus)} → ${esc(a.toStatus)} ${a.comment ? '· ' + esc(a.comment.slice(0, 90)) : ''}</div>`).join('') || '<div class="empty">No events</div>'}
     <div class="modal-actions" style="flex-wrap:wrap">
+      ${(isPM() || isExec()) ? `<button class="btn secondary" onclick="uiTaskEdit('${t.id}')">Edit task</button>` : ''}
       ${canStart ? `<button class="btn primary" onclick="act('POST','/tasks/${t.id}/start')">Start work</button>` : ''}
       ${canFlag ? `<button class="btn primary" onclick="uiFlag('${t.id}')">Flag complete</button>` : ''}
       ${canPm ? `<button class="btn good" onclick="uiPmVerify('${t.id}')">PM verify</button>
@@ -612,6 +786,78 @@ async function uiTaskDetail(id) {
                   <button class="btn bad" onclick="uiCtoReject('${t.id}')">CTO reject</button>` : ''}
       ${canClose ? `<button class="btn primary" onclick="act('POST','/tasks/${t.id}/close')">Close</button>` : ''}
     </div>`);
+}
+
+async function uiTaskEdit(taskId) {
+  const t = await api('GET', '/tasks/' + taskId);
+  const squadDetail = await api('GET', '/squads/' + t.squadId);
+  const devOpts = (squadDetail.members || []).filter((m) => m.role === 'DEVELOPER');
+  
+  const dueIso = t.dueDate ? new Date(t.dueDate).toISOString().slice(0, 16) : '';
+  const html = `
+    <form id="taskEditForm">
+      <div class="field">
+        <label>Title</label>
+        <input type="text" id="teTitle" name="title" value="${esc(t.title)}" required>
+      </div>
+      <div class="field">
+        <label>Description</label>
+        <textarea id="teDesc" name="description" rows="3">${esc(t.description || '')}</textarea>
+      </div>
+      <div class="fieldrow">
+        <div class="field">
+          <label>Story Points (1-13)</label>
+          <input type="number" id="tePoints" name="storyPoints" min="1" max="13" value="${t.storyPoints || 1}" required>
+        </div>
+        <div class="field">
+          <label>Priority</label>
+          <select id="tePriority" name="priority">
+            <option value="LOW" ${t.priority === 'LOW' ? 'selected' : ''}>LOW</option>
+            <option value="MEDIUM" ${t.priority === 'MEDIUM' ? 'selected' : ''}>MEDIUM</option>
+            <option value="HIGH" ${t.priority === 'HIGH' ? 'selected' : ''}>HIGH</option>
+            <option value="CRITICAL" ${t.priority === 'CRITICAL' ? 'selected' : ''}>CRITICAL</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label>Assignee</label>
+        <select id="teAssignee" name="assignedToId">
+          <option value="">— Unassigned (Backlog) —</option>
+          ${devOpts.map((d) => `<option value="${d.userId}" ${d.userId === t.assignedToId ? 'selected' : ''}>${esc(d.fullName)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field">
+        <label>Due Date & Time (Optional)</label>
+        <input type="datetime-local" id="teDue" value="${dueIso}">
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" onclick="uiTaskDetail('${taskId}')">Back</button>
+        <button type="submit" class="btn primary">Save Changes</button>
+      </div>
+    </form>
+  `;
+  modal('Edit Task: ' + esc(t.title), html);
+  document.getElementById('taskEditForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const dueVal = document.getElementById('teDue')?.value;
+    const payload = {
+      title: document.getElementById('teTitle')?.value,
+      description: document.getElementById('teDesc')?.value,
+      storyPoints: +(document.getElementById('tePoints')?.value || 1),
+      priority: document.getElementById('tePriority')?.value,
+      assignedToId: document.getElementById('teAssignee')?.value || null,
+      dueDate: dueVal ? new Date(dueVal).toISOString() : null,
+    };
+    try {
+      await api('PATCH', '/tasks/' + taskId, payload);
+      closeModal();
+      toast('Task updated');
+      render();
+      uiTaskDetail(taskId);
+    } catch (err) {
+      toast(err.message || 'Failed to update task', false);
+    }
+  };
 }
 
 async function act(method, path, body, idem) {
@@ -822,84 +1068,284 @@ function uiTransferMember() {
 }
 
 /* ------------------------------ People (CRUD) ------------------------------ */
-async function uiUserProfile(id) {
+async function uiUserProfile(userId) {
   try {
-    const u = await api('GET', '/users/' + id);
-    const s = u.stats || {};
-    const missed = u.missedDeadlineTasks || [];
-    const isDev = u.role === 'DEVELOPER';
-    const isPm = u.role === 'PM';
+    const p = await api('GET', '/users/' + userId + '/profile');
+    const stats = p.stats || {};
+    const isExecUser = ['CFO', 'CTO', 'CPO', 'CEO'].includes(p.role);
+    const missedList = p.missedDeadlineTasks || [];
+    const missedMap = new Map(missedList.map((m) => [m.id, m]));
 
-    openModal(`Profile: ${esc(u.fullName)}`, `
-      <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:14px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+    const assignedTasks = p.assignedTasks || [];
+    const citations = p.citations || [];
+    const slackerFines = p.slackerFines || [];
+    const dpiSnapshots = p.dpiSnapshots || [];
+    const pmhiSnapshots = p.pmhiSnapshots || [];
+    const auditLogs = p.executiveAuditLogs || [];
+    const execDetails = p.executiveDetails || {};
+
+    let execOperationsHtml = '';
+    if (isExecUser) {
+      let roleHtml = '';
+      if (p.role === 'CFO') {
+        const loans = execDetails.loansApproved || [];
+        const payouts = execDetails.sprintPayouts || [];
+        roleHtml = `
+          <h5 style="margin:14px 0 6px;">Loans Approved (${loans.length})</h5>
+          <table>
+            <tr><th>Borrower Squad</th><th>Principal</th><th>Total Due</th><th>Status</th><th>Date</th></tr>
+            ${loans.map((l) => `<tr>
+              <td><b>${esc(l.borrowerSquad?.name || '—')}</b></td>
+              <td class="money">${money(l.principalAmount)}</td>
+              <td class="money">${money(l.totalDue)}</td>
+              <td>${statusBadge(l.status)}</td>
+              <td class="mono">${dt(l.createdAt)}</td>
+            </tr>`).join('') || '<tr><td colspan="5" class="muted">No loans approved</td></tr>'}
+          </table>
+          <h5 style="margin:14px 0 6px;">Sprint Payouts (${payouts.length})</h5>
+          <table>
+            <tr><th>Lab / Sprint</th><th>Total Proposed</th><th>Status</th><th>Date</th></tr>
+            ${payouts.map((py) => `<tr>
+              <td>Lab ${py.labNumber || '—'}</td>
+              <td class="money">${money(py.totalProposed)}</td>
+              <td>${statusBadge(py.status)}</td>
+              <td class="mono">${dt(py.createdAt)}</td>
+            </tr>`).join('') || '<tr><td colspan="4" class="muted">No sprint payouts</td></tr>'}
+          </table>
+        `;
+      } else if (p.role === 'CTO') {
+        const citationsIssued = execDetails.citationsIssued || [];
+        const consultancies = execDetails.consultancies || [];
+        roleHtml = `
+          <h5 style="margin:14px 0 6px;">Citations Issued (${citationsIssued.length})</h5>
+          <table>
+            <tr><th>Target Squad</th><th>Citation Type</th><th>Fine Amount</th><th>Critique</th><th>Date</th></tr>
+            ${citationsIssued.map((c) => `<tr>
+              <td><b>${esc(c.squad?.name || '—')}</b></td>
+              <td>${badge(c.citationType, 'b-red')}</td>
+              <td class="money">${money(c.fineAmount)}</td>
+              <td>${esc(c.critique)}</td>
+              <td class="mono">${dt(c.createdAt)}</td>
+            </tr>`).join('') || '<tr><td colspan="5" class="muted">No citations issued</td></tr>'}
+          </table>
+          <h5 style="margin:14px 0 6px;">Consultancy Bookings (${consultancies.length})</h5>
+          <table>
+            <tr><th>Client Squad</th><th>Hours</th><th>Total Fee</th><th>Status</th><th>Date</th></tr>
+            ${consultancies.map((cb) => `<tr>
+              <td><b>${esc(cb.clientSquad?.name || '—')}</b></td>
+              <td>${cb.hours || 0} hrs</td>
+              <td class="money">${money(cb.totalFee || 0)}</td>
+              <td>${statusBadge(cb.status)}</td>
+              <td class="mono">${dt(cb.createdAt)}</td>
+            </tr>`).join('') || '<tr><td colspan="5" class="muted">No consultancy bookings</td></tr>'}
+          </table>
+        `;
+      } else if (p.role === 'CPO') {
+        const approvedPayrolls = execDetails.approvedPayrolls || [];
+        const noticesDispatched = execDetails.noticesDispatched || [];
+        roleHtml = `
+          <h5 style="margin:14px 0 6px;">Payroll Proposals Approved (${approvedPayrolls.length})</h5>
+          <table>
+            <tr><th>Squad</th><th>Lab</th><th>Total Proposed</th><th>Status</th><th>Updated</th></tr>
+            ${approvedPayrolls.map((pr) => `<tr>
+              <td><b>${esc(pr.squad?.name || '—')}</b></td>
+              <td>Lab ${pr.labNumber}</td>
+              <td class="money">${money(pr.totalProposed)}</td>
+              <td>${statusBadge(pr.status)}</td>
+              <td class="mono">${dt(pr.updatedAt)}</td>
+            </tr>`).join('') || '<tr><td colspan="5" class="muted">No payroll proposals approved</td></tr>'}
+          </table>
+          <h5 style="margin:14px 0 6px;">Notices Dispatched (${noticesDispatched.length})</h5>
+          <table>
+            <tr><th>Recipient</th><th>Title</th><th>Category</th><th>Date</th></tr>
+            ${noticesDispatched.map((n) => `<tr>
+              <td><b>${esc(n.recipient?.fullName || 'All')}</b> ${n.recipient?.role ? `(${statusBadge(n.recipient.role)})` : ''}</td>
+              <td>${esc(n.title)}</td>
+              <td>${esc(n.category)}</td>
+              <td class="mono">${dt(n.createdAt)}</td>
+            </tr>`).join('') || '<tr><td colspan="4" class="muted">No notices dispatched</td></tr>'}
+          </table>
+        `;
+      } else if (p.role === 'CEO') {
+        const chaosEvents = execDetails.chaosEvents || [];
+        roleHtml = `
+          <h5 style="margin:14px 0 6px;">Chaos Incidents Triggered (${chaosEvents.length})</h5>
+          <table>
+            <tr><th>Event Type</th><th>Severity</th><th>Description</th><th>Status</th><th>Date</th></tr>
+            ${chaosEvents.map((ce) => `<tr>
+              <td><b>${esc(ce.eventType)}</b></td>
+              <td>${badge(ce.severity, ce.severity === 'CRITICAL' ? 'b-red' : 'b-yellow')}</td>
+              <td>${esc(ce.description)}</td>
+              <td>${statusBadge(ce.status)}</td>
+              <td class="mono">${dt(ce.createdAt)}</td>
+            </tr>`).join('') || '<tr><td colspan="5" class="muted">No chaos events triggered</td></tr>'}
+          </table>
+        `;
+      }
+
+      execOperationsHtml = `
+        <div style="margin-top:18px;border-top:1px solid var(--border);padding-top:14px;">
+          <h4 style="margin:0 0 10px;display:flex;align-items:center;gap:8px;">
+            <span>Executive Operations</span>
+            ${statusBadge(p.role)}
+          </h4>
+          <h5 style="margin:12px 0 6px;">Recent Executive Audit Logs (${auditLogs.length})</h5>
+          <div style="max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;margin-bottom:12px;">
+            <table>
+              <tr><th>Timestamp</th><th>Action Type</th><th>Severity</th><th>Payload Snapshot</th></tr>
+              ${auditLogs.map((log) => {
+                const sevClass = log.riskSeverity === 'HIGH' ? 'b-red' : log.riskSeverity === 'MEDIUM' ? 'b-yellow' : 'b-blue';
+                const snap = log.payloadSnapshot ? (typeof log.payloadSnapshot === 'object' ? JSON.stringify(log.payloadSnapshot) : String(log.payloadSnapshot)) : '—';
+                return `<tr>
+                  <td class="mono" style="font-size:11px;">${dt(log.createdAt)}</td>
+                  <td><b>${esc(log.actionType)}</b></td>
+                  <td><span class="badge ${sevClass}">${esc(log.riskSeverity || 'LOW')}</span></td>
+                  <td class="mono" style="font-size:11px;" title="${esc(snap)}">${esc(snap.slice(0, 80))}${snap.length > 80 ? '…' : ''}</td>
+                </tr>`;
+              }).join('') || '<tr><td colspan="4" class="muted" style="padding:10px;text-align:center;">No executive audit logs recorded</td></tr>'}
+            </table>
+          </div>
+          ${roleHtml}
+        </div>
+      `;
+    }
+
+    const content = `
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;">
           <div>
-            <div style="font-size:16px;font-weight:700;">${esc(u.fullName)} ${statusBadge(u.role)} ${u.isActive ? badge('ACTIVE', 'b-green') : badge('INACTIVE', 'b-red')}</div>
-            <div class="muted" style="font-size:12px;margin-top:4px;">${esc(u.email)} · ID: ${esc(u.studentId || '—')} · Joined: ${dt(u.createdAt)}</div>
-            <div style="margin-top:6px;">${(u.squadMemberships || []).map((m) => `<span class="badge b-gray" style="margin-right:4px;">${esc(m.squad?.name || '')} (${esc(m.role || 'MEMBER')})</span>`).join('') || '<span class="muted" style="font-size:12px;">No squad memberships</span>'}</div>
+            <div style="font-size:18px;font-weight:700;display:flex;align-items:center;gap:8px;">
+              <span>${esc(p.fullName)}</span>
+              ${statusBadge(p.role)}
+              ${p.isActive ? badge('ACTIVE', 'b-green') : badge('INACTIVE', 'b-red')}
+            </div>
+            <div class="muted" style="font-size:12.5px;margin-top:4px;">
+              ${esc(p.email)} · Student ID: <b>${esc(p.studentId || '—')}</b> · Joined: ${dt(p.createdAt)}
+            </div>
+            <div style="margin-top:8px;">
+              <span class="muted" style="font-size:12px;margin-right:6px;">Squads:</span>
+              ${(p.squadMemberships || []).map((m) => `<span class="badge b-gray" style="margin-right:4px;">${esc(m.squad?.name || '')} (${esc(m.role || 'MEMBER')})</span>`).join('') || '<span class="muted" style="font-size:12px;">No squad memberships</span>'}
+            </div>
           </div>
           <div style="text-align:right;">
-            <div class="muted" style="font-size:11px;text-transform:uppercase;">Personal Wallet</div>
-            <div style="font-size:18px;font-weight:800;color:var(--accent2);">${money(u.walletBalance || 0)}</div>
+            <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">Personal Wallet</div>
+            <div style="font-size:22px;font-weight:800;color:var(--accent2);">${money(p.walletBalance || 0)}</div>
           </div>
         </div>
       </div>
 
-      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:8px;margin-bottom:14px;">
-        <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px 10px;">
-          <div class="muted" style="font-size:11px;">TASKS & SP</div>
-          <div style="font-size:16px;font-weight:700;">${s.completedTasks || 0} / ${s.totalAssigned || 0}</div>
-          <div class="muted" style="font-size:10px;">${s.storyPointsCompleted || 0} / ${s.storyPointsAssigned || 0} SP</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:10px;margin-bottom:16px;">
+        <div class="card" style="padding:10px 14px;">
+          <div class="muted" style="font-size:11px;">Total Assigned Tasks</div>
+          <div style="font-size:18px;font-weight:700;">${stats.totalAssigned || 0}</div>
         </div>
-        <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px 10px;">
-          <div class="muted" style="font-size:11px;">ON-TIME DELIVERY</div>
-          <div style="font-size:16px;font-weight:700;">${s.onTimeRate ?? 100}%</div>
-          <div class="muted" style="font-size:10px;">deadline compliance</div>
+        <div class="card" style="padding:10px 14px;">
+          <div class="muted" style="font-size:11px;">Completed Tasks</div>
+          <div style="font-size:18px;font-weight:700;">${stats.completedTasks || 0}</div>
         </div>
-        <div style="background:var(--bg);border:1px solid ${missed.length ? 'var(--danger)' : 'var(--border)'};border-radius:6px;padding:8px 10px;">
-          <div class="muted" style="font-size:11px;">MISSED DEADLINES</div>
-          <div style="font-size:16px;font-weight:700;color:${missed.length ? 'var(--danger)' : 'inherit'};">${missed.length}</div>
-          <div class="muted" style="font-size:10px;">${missed.length ? 'overdue / late' : 'perfect record'}</div>
+        <div class="card" style="padding:10px 14px;">
+          <div class="muted" style="font-size:11px;">Missed Deadlines</div>
+          <div style="font-size:18px;"><span style="color:${(stats.overdueTasksCount || 0) > 0 ? '#ef4444' : 'inherit'};font-weight:bold">${stats.overdueTasksCount || 0}</span></div>
         </div>
-        <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px 10px;">
-          <div class="muted" style="font-size:11px;">${isDev ? 'DPI SCORE' : isPm ? 'PMHI SCORE' : 'ROLE'}</div>
-          <div style="font-size:16px;font-weight:700;color:var(--accent);">${isDev ? (s.latestDpi ?? '—') : isPm ? (s.latestPmhi ?? '—') : 'Executive'}</div>
-          <div class="muted" style="font-size:10px;">${isDev ? 'flags: ' + (s.prematureFlagsCount || 0) : 'governance'}</div>
+        <div class="card" style="padding:10px 14px;">
+          <div class="muted" style="font-size:11px;">On-Time Delivery Rate</div>
+          <div style="font-size:18px;font-weight:700;">${stats.onTimeRate ?? 100}%</div>
+        </div>
+        <div class="card" style="padding:10px 14px;">
+          <div class="muted" style="font-size:11px;">Latest DPI / PMHI</div>
+          <div style="font-size:18px;font-weight:700;color:var(--accent);">${stats.latestDpi ?? stats.latestPmhi ?? '—'}</div>
         </div>
       </div>
 
-      ${missed.length > 0 ? `
-        <h4 style="color:var(--danger);margin:12px 0 6px;">⚠️ Missed Deadlines & Overdue Tasks (${missed.length})</h4>
-        <table style="margin-bottom:14px;background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;">
-          <tr><th>Task</th><th>Squad</th><th>Status</th><th>Due Date</th><th>Delay</th></tr>
-          ${missed.map((t) => `<tr>
-            <td><b>${esc(t.title)}</b> <span class="muted" style="font-size:11px;">(${t.storyPoints} SP)</span></td>
-            <td>${esc(t.squadName || '—')}</td>
-            <td>${statusBadge(t.status)}</td>
-            <td style="color:var(--danger);font-family:monospace;">${dt(t.dueDate)}</td>
-            <td><span class="badge b-red">${t.daysOverdue} days late</span> ${t.isCurrentlyOverdue ? '<b>(Still Open)</b>' : '(Done late)'}</td>
-          </tr>`).join('')}
-        </table>
-      ` : ''}
-
-      <h4 style="margin:12px 0 6px;">Assigned Task History (${(u.assignedTasks || []).length})</h4>
-      <div style="max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;margin-bottom:14px;">
-        <table>
-          <tr><th>Title</th><th>Squad</th><th>Status</th><th>SP</th><th>Due</th><th>Git Proof</th></tr>
-          ${(u.assignedTasks || []).map((t) => {
-            const isOv = t.dueDate && !['CTO_VERIFIED','CLOSED'].includes(t.status) && new Date(t.dueDate) < new Date();
-            return `<tr>
-              <td><b>${esc(t.title)}</b></td>
-              <td>${esc(t.squad?.name || '—')}</td>
-              <td>${statusBadge(t.status)}</td>
-              <td>${t.storyPoints}</td>
-              <td style="${isOv ? 'color:var(--danger);font-weight:700;' : ''}">${t.dueDate ? dt(t.dueDate).slice(0, 10) + (isOv ? ' ⚠️' : '') : '—'}</td>
-              <td class="mono" style="font-size:11px;">${esc(t.gitPrUrl || t.gitCommitHash || '—')}</td>
-            </tr>`;
-          }).join('') || '<tr><td colspan="6" class="muted text-center">No assigned tasks</td></tr>'}
-        </table>
+      <div style="margin-bottom:16px;">
+        <h4 style="margin:0 0 8px;">Assigned Tasks & Deadlines (${assignedTasks.length})</h4>
+        <div style="max-height:240px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;">
+          <table>
+            <tr><th>Title</th><th>Status</th><th>Priority</th><th>Points</th><th>Due Date</th><th>Git PR / Commit</th></tr>
+            ${assignedTasks.map((t) => {
+              const m = missedMap.get(t.id);
+              const isOverdueNow = t.dueDate && !['CTO_VERIFIED', 'CLOSED'].includes(t.status) && new Date(t.dueDate) < new Date();
+              const isCurrentlyOverdue = m ? m.isCurrentlyOverdue : isOverdueNow;
+              const daysOverdue = m ? m.daysOverdue : (isOverdueNow && t.dueDate ? Math.ceil((Date.now() - new Date(t.dueDate).getTime()) / (1000 * 60 * 60 * 24)) : 0);
+              const showMissed = isCurrentlyOverdue || daysOverdue > 0;
+              return `<tr>
+                <td>
+                  <b>${esc(t.title)}</b>
+                  ${showMissed ? '<span class="badge b-red" style="font-weight:bold;margin-left:4px">[MISSED DEADLINE]</span>' : ''}
+                </td>
+                <td>${statusBadge(t.status)}</td>
+                <td>${badge(t.priority, t.priority === 'CRITICAL' ? 'b-red' : 'b-gray')}</td>
+                <td>${t.storyPoints || 1} SP</td>
+                <td style="${showMissed ? 'color:var(--danger);font-weight:bold;' : ''}">${t.dueDate ? dt(t.dueDate) : '—'}</td>
+                <td class="mono" style="font-size:11px;">${esc(t.gitPrUrl || t.gitCommitHash || '—')}</td>
+              </tr>`;
+            }).join('') || '<tr><td colspan="6" class="muted" style="padding:12px;text-align:center;">No assigned tasks</td></tr>'}
+          </table>
+        </div>
       </div>
-    `);
+
+      <div style="margin-bottom:16px;">
+        <h4 style="margin:0 0 8px;">Performance & Audits</h4>
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          <div>
+            <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Citations Received from CTO (${citations.length})</div>
+            ${citations.length > 0 ? `
+              <table>
+                <tr><th>Squad</th><th>Citation Type</th><th>Fine Amount</th><th>Critique</th><th>Date</th></tr>
+                ${citations.map((c) => `<tr>
+                  <td><b>${esc(c.squad?.name || '—')}</b></td>
+                  <td>${badge(c.citationType, 'b-red')}</td>
+                  <td class="money">${money(c.fineAmount)}</td>
+                  <td>${esc(c.critique)}</td>
+                  <td class="mono">${dt(c.createdAt)}</td>
+                </tr>`).join('')}
+              </table>
+            ` : '<div class="muted" style="font-size:12px;">No code audit citations received.</div>'}
+          </div>
+
+          <div>
+            <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Slacker Fines (${slackerFines.length})</div>
+            ${slackerFines.length > 0 ? `
+              <table>
+                <tr><th>Description</th><th>Date</th></tr>
+                ${slackerFines.map((f) => `<tr>
+                  <td>${esc(f.description)}</td>
+                  <td class="mono">${dt(f.createdAt)}</td>
+                </tr>`).join('')}
+              </table>
+            ` : '<div class="muted" style="font-size:12px;">No slacker fines recorded.</div>'}
+          </div>
+
+          <div>
+            <div style="font-weight:600;font-size:13px;margin-bottom:4px;">DPI / PMHI Performance Snapshots (${dpiSnapshots.length || pmhiSnapshots.length})</div>
+            ${dpiSnapshots.length > 0 ? `
+              <table>
+                <tr><th>Sprint</th><th>DPI Score</th><th>Premature Flags</th><th>Recorded At</th></tr>
+                ${dpiSnapshots.map((ds) => `<tr>
+                  <td>Sprint ${ds.sprintNumber}</td>
+                  <td><b>${ds.dpiScore}</b></td>
+                  <td>${ds.prematureFlagsCount || 0}</td>
+                  <td class="mono">${dt(ds.createdAt)}</td>
+                </tr>`).join('')}
+              </table>
+            ` : pmhiSnapshots.length > 0 ? `
+              <table>
+                <tr><th>Sprint</th><th>PMHI Score</th><th>Recorded At</th></tr>
+                ${pmhiSnapshots.map((ps) => `<tr>
+                  <td>Sprint ${ps.sprintNumber}</td>
+                  <td><b>${ps.pmhiScore}</b></td>
+                  <td class="mono">${dt(ps.createdAt)}</td>
+                </tr>`).join('')}
+              </table>
+            ` : '<div class="muted" style="font-size:12px;">No performance snapshots recorded yet.</div>'}
+          </div>
+        </div>
+      </div>
+
+      ${execOperationsHtml}
+    `;
+
+    modal('Member Profile: ' + esc(p.fullName), content);
   } catch (e) {
     toast('Failed to load profile: ' + e.message, false);
   }
@@ -912,13 +1358,13 @@ async function viewRoster() {
     <button class="btn ${isExec() ? 'ghost' : 'primary'}" onclick="uiUserCreate()">+ Direct Enroll</button>
   `);
   C().innerHTML = `<div class="panel"><table>
-    <tr><th>Name</th><th>Role</th><th>Email</th><th>Student ID</th><th>Squads</th><th></th></tr>
+    <tr><th>Name</th><th>Role</th><th>Email</th><th>Student ID</th><th>Squads</th><th>Actions</th></tr>
     ${users.map((u) => `<tr>
       <td><a href="#" onclick="event.preventDefault();uiUserProfile('${u.id}')" style="color:var(--primary);font-weight:600;text-decoration:none;">${esc(u.fullName)} ↗</a></td><td>${statusBadge(u.role)}</td>
       <td class="muted">${esc(u.email)}</td><td class="mono">${esc(u.studentId || '—')}</td>
       <td>${(u.squadMemberships || []).map((m) => esc(m.squad?.name || '')).join(', ') || '—'}</td>
       <td class="row">
-        <button class="btn sm secondary" onclick="uiUserProfile('${u.id}')">Profile</button>
+        <button class="btn sm" onclick="uiUserProfile('${u.id}')">Profile</button>
         <button class="btn sm" onclick="uiCopy('${u.id}')">ID</button>
         ${canManage() ? `<button class="btn sm" onclick="uiUserEdit('${u.id}','${esc(u.fullName)}','${esc(u.email)}','${u.role}','${esc(u.studentId || '')}')">Edit</button>` : ''}
       </td></tr>`).join('')}
