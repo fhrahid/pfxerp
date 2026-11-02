@@ -2,6 +2,7 @@ node_modules/
 dist/
 .env
 *.log
+*.tsbuildinfo
 
 # Agent skills installed locally
 .agents/
