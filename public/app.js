@@ -104,10 +104,12 @@ function formModal(title, fields, submitLabel, onSubmit, wide) {
     const data = {};
     for (const f of fields) data[f.name] = f.type === 'checkbox' ? fd.get(f.name) === 'on' : fd.get(f.name);
     try {
-      await onSubmit(data);
-      closeModal();
-      toast('Success');
-      render();
+      const res = await onSubmit(data);
+      if (res !== false) {
+        closeModal();
+        toast('Success');
+        render();
+      }
     } catch (err) { toast(err.message || 'Failed', false); }
   };
 }
@@ -444,6 +446,14 @@ async function render() {
 /* ============================== views ============================== */
 
 async function viewOverview() {
+  if (isExec()) {
+    tabActions(`
+      <button class="btn primary" onclick="uiInviteDeveloper()">+ Send Invitation Link</button>
+      ${isCEO() ? '<button class="btn ghost" onclick="uiCreateRole()">+ New Role</button>' : ''}
+    `);
+  } else {
+    tabActions('');
+  }
   const me = await api('GET', '/dashboard/me');
   let noticesHtml = '';
   try {
@@ -671,7 +681,10 @@ async function uiSquadDetail(id) {
       ${(s.members || []).map((m) => `<tr><td>${esc(m.fullName)}<div class="muted" style="font-size:11px">${esc(m.email)}</div></td><td>${statusBadge(m.role)}</td><td>${(Number(m.allocation) * 100).toFixed(0)}%</td>
         ${canManage() ? `<td><button class="btn sm bad" onclick="uiRemoveMember('${id}','${m.userId}','${esc(m.fullName)}')">Remove</button></td>` : ''}</tr>`).join('') || '<tr><td colspan="4" class="empty">No members</td></tr>'}
     </table>
-    ${canManage() && addable.length ? `<div class="modal-actions" style="justify-content:flex-start"><button class="btn primary" onclick="uiAddMember('${id}')">+ Add member</button></div>` : ''}`);
+    ${canManage() ? `<div class="modal-actions" style="justify-content:flex-start;gap:8px;">
+      ${addable.length ? `<button class="btn ghost" onclick="uiAddMember('${id}')">+ Add Existing Member</button>` : ''}
+      ${isExec() ? `<button class="btn primary" onclick="closeModal();uiInviteDeveloper('${id}')">+ Invite New Member</button>` : ''}
+    </div>` : ''}`);
 }
 
 function uiAddMember(squadId) {
@@ -706,7 +719,10 @@ function uiTransferMember() {
 /* ------------------------------ People (CRUD) ------------------------------ */
 async function viewRoster() {
   const users = await api('GET', '/users');
-  tabActions('<button class="btn primary" onclick="uiUserCreate()">+ New member</button>');
+  tabActions(`
+    ${isExec() ? '<button class="btn primary" onclick="uiInviteDeveloper()">+ Send Invitation Link</button>' : ''}
+    <button class="btn ${isExec() ? 'ghost' : 'primary'}" onclick="uiUserCreate()">+ Direct Enroll</button>
+  `);
   C().innerHTML = `<div class="panel"><table>
     <tr><th>Name</th><th>Role</th><th>Email</th><th>Student ID</th><th>Squads</th><th></th></tr>
     ${users.map((u) => `<tr>
@@ -722,6 +738,23 @@ async function viewRoster() {
 
 function uiCopy(text) {
   navigator.clipboard?.writeText(text).then(() => toast('Copied: ' + text));
+}
+
+function uiCopyLink(inputId) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  input.select();
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(input.value).then(() => {
+      toast('Copied invitation link to clipboard!');
+    }).catch(() => {
+      document.execCommand('copy');
+      toast('Copied invitation link to clipboard!');
+    });
+  } else {
+    document.execCommand('copy');
+    toast('Copied invitation link to clipboard!');
+  }
 }
 
 async function uiUserCreate() {
@@ -785,16 +818,29 @@ async function viewInvitations() {
     : `<button class="btn primary" onclick="uiInviteDeveloper()">+ Invite Dev / PM</button>`;
   tabActions(actions);
   const list = await api('GET', '/invitations');
+
+  const total = list.length;
+  const pending = list.filter((i) => i.status === 'PENDING').length;
+  const accepted = list.filter((i) => i.status === 'ACCEPTED').length;
+  const expired = list.filter((i) => i.status === 'EXPIRED').length;
+
   C().innerHTML = `
+    <div class="cards" style="margin-bottom:16px;">
+      <div class="card"><div class="k">Total Invitations</div><div class="v">${total}</div></div>
+      <div class="card"><div class="k">Pending (Active 72h)</div><div class="v" style="color:var(--warn);">${pending}</div></div>
+      <div class="card"><div class="k">Accepted Members</div><div class="v" style="color:var(--accent2);">${accepted}</div></div>
+      <div class="card"><div class="k">Expired / Revoked</div><div class="v" style="color:var(--danger);">${expired}</div></div>
+    </div>
     <div class="panel">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
-        <h3>Developer & Member Invitations (${list.length})</h3>
+        <h3>Developer & Member Invitations (${total})</h3>
         <span class="muted" style="font-size:12px;">72-hour expiration enforced · Powered by Resend</span>
       </div>
       <table>
         <tr>
           <th>Recipient</th>
           <th>Role</th>
+          <th>Squad</th>
           <th>Status</th>
           <th>Expires At</th>
           <th>Invited By</th>
@@ -809,6 +855,7 @@ async function viewInvitations() {
             <tr>
               <td><b>${esc(inv.email)}</b></td>
               <td>${badge(inv.role, 'b-blue')}</td>
+              <td>${esc(inv.targetSquadId ? squadName(inv.targetSquadId) : '—')}</td>
               <td>${badge(inv.status, badgeClass)}</td>
               <td class="muted">${dt(inv.expiresAt)}</td>
               <td>${esc(inv.invitedBy?.fullName || inv.invitedBy?.email || '—')} <span class="muted">(${esc(inv.invitedBy?.role || '')})</span></td>
@@ -819,7 +866,7 @@ async function viewInvitations() {
                 </div>
               </td>
             </tr>`;
-        }).join('') || '<tr><td colspan="6" class="empty">No invitations sent yet. Click the invite button above to send an invitation link.</td></tr>'}
+        }).join('') || '<tr><td colspan="7" class="empty">No invitations sent yet. Click the invite button above to send an invitation link.</td></tr>'}
       </table>
     </div>`;
 }
@@ -842,7 +889,7 @@ async function uiCreateRole() {
   });
 }
 
-async function uiInviteDeveloper() {
+async function uiInviteDeveloper(defaultSquadId = '') {
   await loadSquads();
   const squadOptions = [{ value: '', label: 'None (Assign Later)' }, ...S.squads.map((sq) => ({ value: sq.id, label: sq.name }))];
 
@@ -871,7 +918,7 @@ async function uiInviteDeveloper() {
   formModal(modalTitle, [
     { name: 'email', label: 'Institutional Email (@seu.edu.bd)', required: true, hint: 'email', placeholder: 'user@seu.edu.bd' },
     { name: 'role', label: 'Assign Role', type: 'select', value: 'DEVELOPER', options: roleOptions },
-    { name: 'targetSquadId', label: 'Assign to Squad (Optional)', type: 'select', value: '', options: squadOptions },
+    { name: 'targetSquadId', label: 'Assign to Squad (Optional)', type: 'select', value: defaultSquadId || '', options: squadOptions },
   ], 'Send 72-Hour Invitation Link', async (fd) => {
     const email = (fd.email || '').trim().toLowerCase();
     if (!/^[a-zA-Z0-9._%+-]+@seu\.edu\.bd$/.test(email)) {
@@ -882,18 +929,67 @@ async function uiInviteDeveloper() {
       role: fd.role || 'DEVELOPER',
       targetSquadId: fd.targetSquadId || undefined,
     });
-    if (res.inviteUrl) {
-      toast('Invitation sent! Dev link: ' + res.inviteUrl);
-    } else {
-      toast('72-hour invitation link dispatched to ' + email);
+
+    const inviteUrl = res.inviteUrl || '';
+    const assignedRole = res.role || fd.role || 'DEVELOPER';
+    const expiresAtText = res.expiresAt ? dt(res.expiresAt) : 'In 72 hours';
+
+    openModal('Invitation Dispatched!', `
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        <div style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:12px;">
+          <div style="font-size:13.5px;margin-bottom:6px;"><b>Recipient:</b> ${esc(email)}</div>
+          <div style="font-size:13.5px;margin-bottom:6px;"><b>Assigned Role:</b> <span class="badge b-blue">${esc(assignedRole)}</span></div>
+          <div style="font-size:13.5px;margin-bottom:6px;"><b>Expires At:</b> <span class="muted">${esc(expiresAtText)}</span> (Strict 72-hour limit)</div>
+          <div style="font-size:12.5px;color:var(--muted);margin-top:6px;">Invitation email dispatched via Resend. The developer can also join directly using the shareable link below:</div>
+        </div>
+
+        ${inviteUrl ? `
+          <div>
+            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;color:var(--muted);">Shareable Onboarding Link</label>
+            <div style="display:flex;gap:8px;">
+              <input type="text" id="invite-share-link" readonly value="${esc(inviteUrl)}" class="inp" style="flex:1;font-family:monospace;font-size:12px;" onclick="this.select()" />
+              <button type="button" class="btn primary" onclick="uiCopyLink('invite-share-link')">Copy Link</button>
+            </div>
+          </div>
+        ` : ''}
+
+        <div class="modal-actions" style="margin-top:8px;">
+          <button type="button" class="btn ghost" onclick="closeModal()">Close</button>
+          <button type="button" class="btn primary" onclick="closeModal();setTab('invitations');">View All Invitations</button>
+        </div>
+      </div>
+    `);
+
+    toast('Invitation dispatched to ' + email);
+    if (S.tab === 'invitations') {
+      viewInvitations();
     }
+    return false;
   });
 }
 
 async function uiResendInvitation(id) {
   try {
     const res = await api('POST', `/invitations/${id}/resend`);
-    toast(res.inviteUrl ? 'Invitation resent! Dev link: ' + res.inviteUrl : 'Invitation resent! 72-hour window refreshed.');
+    const inviteUrl = res.inviteUrl || '';
+    toast(inviteUrl ? 'Invitation resent! Dev link: ' + inviteUrl : 'Invitation resent! 72-hour window refreshed.');
+    if (inviteUrl) {
+      openModal('Invitation Refreshed (72h)', `
+        <div style="display:flex;flex-direction:column;gap:14px;">
+          <p style="font-size:13.5px;margin:0;">The 72-hour validity window has been refreshed and a new email dispatched via Resend.</p>
+          <div>
+            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;color:var(--muted);">New Shareable Onboarding Link</label>
+            <div style="display:flex;gap:8px;">
+              <input type="text" id="resend-share-link" readonly value="${esc(inviteUrl)}" class="inp" style="flex:1;font-family:monospace;font-size:12px;" onclick="this.select()" />
+              <button type="button" class="btn primary" onclick="uiCopyLink('resend-share-link')">Copy Link</button>
+            </div>
+          </div>
+          <div class="modal-actions" style="margin-top:8px;">
+            <button type="button" class="btn primary" onclick="closeModal();viewInvitations();">Done</button>
+          </div>
+        </div>
+      `);
+    }
     await viewInvitations();
   } catch (e) {
     toast(e.message, false);

@@ -236,6 +236,64 @@ async function runBrowserE2ETest() {
     }, { timeout: 6000 });
     await sleep(1000);
 
+    // Verify "Invitation Dispatched!" dialog with shareable link
+    const hasShareableModal = await page.evaluate(() => {
+      const modal = document.querySelector('#modal-root');
+      return modal && modal.textContent.includes('Invitation Dispatched!') && !!document.querySelector('#invite-share-link');
+    });
+    if (hasShareableModal) {
+      console.log('✓ Interactive Invitation Dispatched modal appeared with copyable link input');
+      await page.screenshot({ path: path.join(SCRATCH_DIR, '08b_invitation_dispatched_modal.png') });
+      // Click "View All Invitations" to close modal and show table
+      await page.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll('#modal-root button'));
+        const closeBtn = btns.find((b) => b.textContent.includes('View All Invitations') || b.textContent.includes('Close'));
+        if (closeBtn) closeBtn.click();
+      });
+      await sleep(600);
+    }
+
+    // Verify summary counter cards
+    const hasStatCards = await page.evaluate(() => {
+      const content = document.querySelector('#content')?.textContent || '';
+      return content.includes('Total Invitations') && content.includes('Pending (Active 72h)');
+    });
+    if (!hasStatCards) {
+      throw new Error('Invitations summary cards (Total, Pending 72h) not found!');
+    }
+    console.log('✓ Invitations summary stats header (Total, Pending, Accepted, Expired) confirmed');
+
+    // Verify Overview tab has "+ Send Invitation Link" for C-level
+    await page.evaluate(() => {
+      const overviewLink = Array.from(document.querySelectorAll('.sidebar .nav-btn')).find((b) => b.textContent.includes('Overview'));
+      if (overviewLink) overviewLink.click();
+    });
+    await sleep(600);
+    const overviewHasInvite = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll('#tab-actions button')).some((b) => b.textContent.includes('Invitation Link'));
+    });
+    if (!overviewHasInvite) throw new Error('Overview tab missing "+ Send Invitation Link" button for C-level!');
+    console.log('✓ Overview tab has "+ Send Invitation Link" for C-level');
+
+    // Verify People tab has "+ Send Invitation Link" for C-level
+    await page.evaluate(() => {
+      const rosterLink = Array.from(document.querySelectorAll('.sidebar .nav-btn')).find((b) => b.textContent.includes('People'));
+      if (rosterLink) rosterLink.click();
+    });
+    await sleep(600);
+    const rosterHasInvite = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll('#tab-actions button')).some((b) => b.textContent.includes('Invitation Link'));
+    });
+    if (!rosterHasInvite) throw new Error('People tab missing "+ Send Invitation Link" button for C-level!');
+    console.log('✓ People tab has "+ Send Invitation Link" for C-level');
+
+    // Navigate back to Invitations tab for remaining test steps
+    await page.evaluate(() => {
+      const invLink = Array.from(document.querySelectorAll('.sidebar .nav-btn')).find((b) => b.textContent.includes('Invitations'));
+      if (invLink) invLink.click();
+    });
+    await sleep(800);
+
     // Verify invitation appears in table
     const tableContainsDev = await page.evaluate(() => {
       return document.querySelector('#content')?.textContent.includes('e2e_dev@seu.edu.bd');
@@ -274,6 +332,14 @@ async function runBrowserE2ETest() {
       return toasts.some((t) => t.textContent.includes('resent') || t.textContent.includes('Resent') || t.textContent.includes('72-hour'));
     }, { timeout: 6000 });
     await sleep(500);
+
+    // Dismiss resend dialog if present
+    await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll('#modal-root button'));
+      const doneBtn = btns.find((b) => b.textContent.includes('Done') || b.textContent.includes('✕'));
+      if (doneBtn) doneBtn.click();
+    });
+    await sleep(400);
 
     await page.screenshot({ path: path.join(SCRATCH_DIR, '10_invitation_resent_toast.png') });
     console.log('✓ Resend (72h) triggered and toast verified');
