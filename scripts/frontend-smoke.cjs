@@ -8,7 +8,6 @@ const code = fs.readFileSync('public/app.js', 'utf8');
 /* ---------- stubs ---------- */
 const elements = new Map();
 function makeEl(id) {
-  const classes = new Set();
   return {
     id,
     _html: '',
@@ -19,11 +18,7 @@ function makeEl(id) {
     value: '',
     checked: false,
     children: [],
-    classList: {
-      add: (...names) => names.forEach((name) => classes.add(name)),
-      remove: (...names) => names.forEach((name) => classes.delete(name)),
-      contains: (name) => classes.has(name),
-    },
+    classList: { add() {}, remove() {}, contains() { return false; }, toggle() {} },
     appendChild() {}, remove() {},
     setAttribute() {}, addEventListener() {},
     querySelectorAll: () => [],
@@ -42,6 +37,7 @@ const documentStub = {
   getElementById: getEl,
   createElement: () => makeEl('tmp'),
   querySelectorAll: () => [],
+  body: makeEl('body'),
 };
 
 /* canned API data */

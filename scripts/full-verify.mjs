@@ -14,7 +14,13 @@ import { createNoticeKeys, encryptNotice, signNotice } from './notice-crypto.mjs
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DBQ_SCRIPT = join(__dirname, 'dbq.cjs');
 
-const BASE = process.env.BASE_URL || 'http://localhost:3001/api/v1';
+// BASE_URL must be the API root INCLUDING /api/v1. Default is IPv4-safe
+// (127.0.0.1) because WSL/other services can occupy [::1]:3000 on dev machines.
+function resolveBase() {
+  const raw = process.env.BASE_URL || 'http://127.0.0.1:3000';
+  return raw.endsWith('/api/v1') ? raw : `${raw.replace(/\/$/, '')}/api/v1`;
+}
+const BASE = resolveBase();
 
 let passed = 0, failed = 0;
 const failures = [];
@@ -54,11 +60,17 @@ const squadId = (n) => dbq(`SELECT id FROM "Squad" WHERE name='Squad ${n}'`);
 const totalMoney = () => dbNum('SELECT SUM(balance) FROM "Account"');
 
 async function raw(method, path, body, token, headers = {}) {
-  const res = await fetch(BASE + path, {
-    method,
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  let res;
+  try {
+    res = await fetch(BASE + path, {
+      method,
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch (e) {
+    const cause = (e && e.cause && (e.cause.code || e.cause.message)) || '';
+    throw new Error(`fetch failed [${cause}] ${method} ${path}`);
+  }
   let json = null;
   try { json = await res.json(); } catch { /* empty */ }
   return { status: res.status, ok: res.ok, data: json?.data, error: json?.error };

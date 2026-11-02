@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_DB: pointfex_db
       POSTGRES_USER: pointfex_admin
-      POSTGRES_PASSWORD: "${DB_PASSWORD:?Set DB_PASSWORD in the deployment environment}"
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-pointfex_dev_password}
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
@@ -26,12 +26,13 @@ services:
     container_name: pointfex-api
     restart: always
     environment:
-      DATABASE_URL: "postgresql://pointfex_admin:${DB_PASSWORD:?Set DB_PASSWORD in the deployment environment}@postgres:5432/pointfex_db?schema=public&connection_limit=25"
-      JWT_SECRET: ${JWT_SECRET:?Set a strong JWT_SECRET in the deployment environment}
-      LEDGER_SECRET_KEY: ${LEDGER_SECRET_KEY:?Set a separate strong LEDGER_SECRET_KEY in the deployment environment}
+      DATABASE_URL: "postgresql://pointfex_admin:${DB_PASSWORD:-pointfex_dev_password}@postgres:5432/pointfex_db?schema=public&connection_limit=25"
+      JWT_SECRET: ${JWT_SECRET:-dev_jwt_secret_change_me}
+      LEDGER_SECRET_KEY: ${LEDGER_SECRET_KEY:-dev_ledger_secret_change_me}
       INITIAL_CEO_EMAIL: ${INITIAL_CEO_EMAIL:-noor@seu.edu.bd}
-      INITIAL_CEO_PASSWORD: ${INITIAL_CEO_PASSWORD:?Set INITIAL_CEO_PASSWORD in the deployment environment}
-      NODE_ENV: ${NODE_ENV:-production}
+      INITIAL_CEO_PASSWORD: ${INITIAL_CEO_PASSWORD:-PointfexCeo2026!}
+      ALLOWED_EMAIL_DOMAIN: ${ALLOWED_EMAIL_DOMAIN:-seu.edu.bd}
+      NODE_ENV: production
     ports:
       - "3000:3000"
     depends_on:

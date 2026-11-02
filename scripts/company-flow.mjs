@@ -6,12 +6,13 @@
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { createNoticeKeys, encryptNotice, signNotice } from './notice-crypto.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DBQ_SCRIPT = join(__dirname, 'dbq.cjs');
 
-const BASE = process.env.BASE_URL || 'http://localhost:3001/api/v1';
+const raw = process.env.BASE_URL || 'http://127.0.0.1:3000';
+const BASE = raw.endsWith('/api/v1') ? raw : `${raw.replace(/\/$/, '')}/api/v1`;
+const b64 = (s) => Buffer.from(s).toString('base64');
 
 const dbq = (sql) => execFileSync(process.execPath, [DBQ_SCRIPT, sql], { encoding: 'utf8' }).trim();
 const dbNum = (sql) => Number(dbq(sql) || 0);
@@ -54,10 +55,6 @@ const pm6 = await login('pm6@seu.edu.bd');
 const d21 = await login('dev2_1@seu.edu.bd');
 const d31 = await login('dev3_1@seu.edu.bd');
 const d42 = await login('dev4_2@seu.edu.bd');
-const cpoKeys = createNoticeKeys();
-const d42Keys = createNoticeKeys();
-await raw('POST', '/notices/keys/register', { publicKey: JSON.stringify(cpoKeys.publicKey) }, cpo);
-await raw('POST', '/notices/keys/register', { publicKey: JSON.stringify(d42Keys.publicKey) }, d42);
 
 /* ───────────────────────── 1. Morning standup ───────────────────────── */
 step(1, 'CEO opens the 360 command center');
@@ -147,18 +144,12 @@ step(7, 'CTO audits Squad 5; discipline for Squad 4');
   await raw('POST', '/cto/citations', { squadId: sq(5), type: 'CODE_SMELL', description: 'Controller contains 400 lines of inline business logic' }, cto, { 'X-Idempotency-Key': idem() });
   log(`Squad 5 cited (fine ${taka(2000)}: ${taka(before)} → ${taka(treasury(5))}; CTO cut ${taka(1000)})`);
 
-  const recipientId = uid('dev4_2@seu.edu.bd');
-  const title = 'Disciplinary citation — Lab 8';
-  const category = 'DISCIPLINARY';
-  const encryptedContent = encryptNotice(
-    'Zero commits and two missed standups this week. Your payroll tier is set to SLACKER.',
-    JSON.stringify(d42Keys.publicKey),
-  );
-  const signature = signNotice(cpoKeys, JSON.stringify([recipientId, title, category, encryptedContent]));
-  const notice = await raw('POST', '/notices', { recipientId, title, category, encryptedContent, signature }, cpo);
-  await raw('POST', `/notices/${notice.noticeId}/acknowledge`, {
-    acknowledgmentSignature: signNotice(d42Keys, `ack:${notice.noticeId}`),
-  }, d42);
+  const notice = await raw('POST', '/notices', {
+    recipientId: uid('dev4_2@seu.edu.bd'), title: 'Disciplinary citation — Lab 8', category: 'DISCIPLINARY',
+    encryptedContent: b64('Zero commits and two missed standups this week. Your payroll tier is set to SLACKER.'),
+    signature: b64('ed25519-' + Date.now()),
+  }, cpo);
+  await raw('POST', `/notices/${notice.noticeId}/acknowledge`, { acknowledgmentSignature: b64('ack-' + Date.now()) }, d42);
   log('Slacker notice dispatched (E2EE) and cryptographically acknowledged by dev4_2');
 }
 

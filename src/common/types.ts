@@ -23,10 +23,17 @@ export function isOverrideRole(role: UserRole | string): boolean {
   return role === UserRole.CEO || role === UserRole.CTO || role === UserRole.CPO;
 }
 
-/** Enforces strictly @seu.edu.bd email domain for authentication and registration. */
+/**
+ * Enforces the studio email domain for authentication and registration.
+ * Configurable via ALLOWED_EMAIL_DOMAIN (comma-separated list), default: seu.edu.bd
+ */
 export function isAllowedEmailDomain(email: string): boolean {
   if (!email || typeof email !== 'string') return false;
   const normalized = email.trim().toLowerCase();
-  return /^[a-zA-Z0-9._%+-]+@seu\.edu\.bd$/.test(normalized);
+  const domains = (process.env.ALLOWED_EMAIL_DOMAIN || 'seu.edu.bd')
+    .split(',')
+    .map((d) => d.trim().toLowerCase().replace(/^@/, ''))
+    .filter(Boolean);
+  return domains.some((domain) => normalized.endsWith(`@${domain}`));
 }
 
