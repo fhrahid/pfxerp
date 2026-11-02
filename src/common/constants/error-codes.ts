@@ -3,6 +3,7 @@ export const ErrorCodes = {
   AUTH_INVALID_CREDENTIALS: { status: 401, message: 'Email or password incorrect.' },
   AUTH_TOKEN_EXPIRED: { status: 401, message: 'Access token expired (refresh required).' },
   AUTH_TOKEN_REVOKED: { status: 401, message: 'Token blacklisted or session terminated.' },
+  AUTH_INVALID_TOKEN: { status: 400, message: 'Token is invalid, malformed, or already used.' },
   AUTHZ_FORBIDDEN: { status: 403, message: 'User role lacks permission for action.' },
   AUTHZ_NOT_OWNER: { status: 403, message: 'Attempting to access another user\u2019s wallet or notices.' },
   AUTHZ_CROSS_SQUAD: { status: 403, message: 'Attempting to access or alter another squad\u2019s tasks.' },

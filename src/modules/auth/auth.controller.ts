@@ -1,5 +1,5 @@
-import { Body, Controller, Get, HttpCode, Post } from '@nestjs/common';
-import { IsEmail, IsNotEmpty, IsString } from 'class-validator';
+import { Body, Controller, Get, Headers, HttpCode, Post } from '@nestjs/common';
+import { IsEmail, IsNotEmpty, IsString, MinLength } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ApiTags } from '@nestjs/swagger';
 import { Public, CurrentUser } from '../../common/decorators';
@@ -21,6 +21,22 @@ class RefreshDto {
   @IsString()
   @IsNotEmpty()
   refreshToken: string;
+}
+
+class ForgotPasswordDto {
+  @IsEmail({}, { message: 'Must be a valid email address' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
+  email: string;
+}
+
+class ResetPasswordDto {
+  @IsString()
+  @IsNotEmpty({ message: 'Reset token is required' })
+  token: string;
+
+  @IsString()
+  @MinLength(8, { message: 'Password must be at least 8 characters long' })
+  password: string;
 }
 
 @ApiTags('auth')
@@ -49,6 +65,20 @@ export class AuthController {
   @Post('logout')
   logout(@CurrentUser() user: AuthUser) {
     return this.auth.logout(user.id);
+  }
+
+  @Public()
+  @HttpCode(200)
+  @Post('forgot-password')
+  forgotPassword(@Body() dto: ForgotPasswordDto, @Headers('x-internal-test-key') testKey?: string) {
+    return this.auth.forgotPassword(dto.email, testKey);
+  }
+
+  @Public()
+  @HttpCode(200)
+  @Post('reset-password')
+  resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.auth.resetPassword(dto.token, dto.password);
   }
 
   @Get('me')
