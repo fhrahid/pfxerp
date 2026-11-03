@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDownLeft, ArrowUpRight, Landmark } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Landmark, TriangleAlert } from "lucide-react";
 import { api, ROLES } from "@/lib/api";
 import { useAction, useMe, useSquads } from "@/components/shell";
 import { FormDialog } from "@/components/form-dialog";
@@ -26,6 +26,12 @@ export default function AccountingPage() {
     queryKey: ["pool-funding-requests"], queryFn: () => api<any[]>("GET", "/ledger/pool-funding/requests"),
     enabled: isCeo || isCfo,
   });
+  const reconciliation = useQuery({
+    queryKey: ["ledger-reconciliation"],
+    queryFn: () => api<any>("POST", "/ledger/verify-chain"),
+    enabled: isCeo,
+    staleTime: 60_000,
+  });
   const [selected, setSelected] = React.useState("");
   const activeId = (accounts.data || []).some((a) => a.id === selected) ? selected : accounts.data?.[0]?.id;
   const activeAccount = (accounts.data || []).find((a: any) => a.id === activeId);
@@ -47,6 +53,17 @@ export default function AccountingPage() {
         <h1 className="text-2xl font-bold">Accounting</h1>
         <p className="text-sm text-muted-foreground">Immutable double-entry ledger · debits and credits are scoped by role.</p>
       </div>
+
+      {isCeo && reconciliation.data?.totalBalanceDiscrepancies > 0 ? (
+        <Card className="border-amber-500/50 bg-amber-50/50 dark:bg-amber-950/20">
+          <CardHeader><CardTitle className="flex items-center gap-2 text-base text-amber-800 dark:text-amber-300"><TriangleAlert className="h-4 w-4" /> Opening-balance reconciliation needed</CardTitle></CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            <p>{reconciliation.data.totalBalanceDiscrepancies} account(s) differ from available ledger history. Hash chain: {reconciliation.data.brokenEntriesCount ? "BROKEN" : "intact"}.</p>
+            <p className="text-muted-foreground">This can indicate balances created before the ledger was enabled. No automatic adjustment was made. Confirm the opening date and source against bank records before recording an adjustment.</p>
+            {reconciliation.data.balanceDiscrepancies.slice(0, 5).map((d: any) => <div key={d.accountId} className="flex justify-between gap-2 border-t pt-1 text-xs"><span>{d.type} · {d.squadId || d.ownerId || d.accountId}</span><span>book {taka(d.currentBalance)} · journal {taka(d.ledgerBalance)} · difference {taka(d.difference)}</span></div>)}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {(isCfo || isCeo) ? (
         <div className="flex flex-wrap gap-2">

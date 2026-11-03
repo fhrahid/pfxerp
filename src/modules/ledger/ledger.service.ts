@@ -256,9 +256,11 @@ export class LedgerService {
   // CEO: one-click chain integrity verification (BR-CEO-10)
   // --------------------------------------------------------------
   async verifyChain() {
-    const entries = await this.prisma.ledgerEntry.findMany({
-      orderBy: { sequenceNumber: 'asc' },
-    });
+    const [entries, accounts, aggregates] = await Promise.all([
+      this.prisma.ledgerEntry.findMany({ orderBy: { sequenceNumber: 'asc' } }),
+      this.prisma.account.findMany({ select: { id: true, type: true, ownerId: true, squadId: true, balance: true } }),
+      this.prisma.ledgerEntry.groupBy({ by: ['accountId', 'direction'], _sum: { amount: true } }),
+    ]);
 
     let expectedPrev = GENESIS_HASH;
     const broken: number[] = [];
@@ -276,12 +278,34 @@ export class LedgerService {
       expectedPrev = entry.entryHash;
     }
 
+    // Report legacy opening-balance gaps separately from hash tampering. Never
+    // silently adjust production books to make this report pass.
+    const netByAccount = new Map<string, number>();
+    for (const row of aggregates) {
+      const amount = Number(row._sum.amount || 0);
+      netByAccount.set(row.accountId, (netByAccount.get(row.accountId) || 0) + (row.direction === 'CREDIT' ? amount : -amount));
+    }
+    const balanceDiscrepancies = accounts.map((account) => {
+      const ledgerBalance = Math.round((netByAccount.get(account.id) || 0) * 100) / 100;
+      return {
+        accountId: account.id,
+        type: account.type,
+        ownerId: account.ownerId,
+        squadId: account.squadId,
+        currentBalance: Number(account.balance),
+        ledgerBalance,
+        difference: Math.round((Number(account.balance) - ledgerBalance) * 100) / 100,
+      };
+    }).filter((row) => Math.abs(row.difference) >= 0.01);
+
     return {
       totalEntriesVerified: entries.length,
       chainStatus: broken.length === 0 ? 'VALID' : 'TAMPERED',
       lastVerifiedSequence: entries.length ? Number(entries[entries.length - 1].sequenceNumber) : 0,
       brokenEntriesCount: broken.length,
       brokenSequences: broken,
+      totalBalanceDiscrepancies: balanceDiscrepancies.length,
+      balanceDiscrepancies: balanceDiscrepancies.slice(0, 100),
     };
   }
 
