@@ -1368,7 +1368,7 @@ async function viewRoster() {
       <td class="row">
         <button class="btn sm" onclick="uiUserProfile('${u.id}')">Profile</button>
         <button class="btn sm" onclick="uiCopy('${u.id}')">ID</button>
-        ${canManage() ? `<button class="btn sm" onclick="uiUserEdit('${u.id}','${esc(u.fullName)}','${esc(u.email)}','${u.role}','${esc(u.studentId || '')}')">Edit</button>` : ''}
+        ${canManage() && (isCEO() || !['CEO', 'CFO', 'CTO', 'CPO'].includes(u.role)) ? `<button class="btn sm" onclick="uiUserEdit('${u.id}','${esc(u.fullName)}','${esc(u.email)}','${u.role}','${esc(u.studentId || '')}')">Edit</button>` : ''}
       </td></tr>`).join('')}
   </table></div>`;
 }
@@ -1418,6 +1418,12 @@ async function uiUserCreate() {
 }
 
 async function uiUserEdit(id, fullName, email, role, studentId) {
+  // RBAC hierarchy: executive accounts (incl. the CEO) are CEO-administered only.
+  if (!isCEO() && ['CEO', 'CFO', 'CTO', 'CPO'].includes(role)) {
+    toast('Only the CEO can edit executive accounts.');
+    return;
+  }
+  const isSelfEdit = !isCEO() && id === S.user.id;
   let roleOptions = [
     { value: 'DEVELOPER', label: 'DEVELOPER' },
     { value: 'PM', label: 'PM' },
@@ -1437,13 +1443,20 @@ async function uiUserEdit(id, fullName, email, role, studentId) {
   formModal('Edit member', [
     { name: 'fullName', label: 'Full name', value: fullName, required: true },
     { name: 'email', label: 'Email', type: 'text', hint: 'email', value: email, required: true },
-    { name: 'role', label: 'Role', type: 'select', value: role, options: roleOptions },
+    ...(isSelfEdit
+      ? [{ name: 'roleNote', label: 'Role (fixed)', type: 'text', value: role, hint: 'You cannot change your own role' }]
+      : [{ name: 'role', label: 'Role', type: 'select', value: role, options: roleOptions }]),
     { name: 'studentId', label: 'Student ID', value: studentId },
     { name: 'password', label: 'New password (leave blank to keep)', placeholder: 'min 8 chars' },
-    { name: 'isActive', label: 'Active (uncheck to deactivate & revoke sessions)', type: 'checkbox', value: true },
+    ...(isSelfEdit
+      ? []
+      : [{ name: 'isActive', label: 'Active (uncheck to deactivate & revoke sessions)', type: 'checkbox', value: true }]),
   ], 'Save changes', (d) => act('PATCH', `/users/${id}`, {
-    fullName: d.fullName, email: d.email, role: d.role, studentId: d.studentId || null,
-    isActive: !!d.isActive, ...(d.password ? { password: d.password } : {}),
+    fullName: d.fullName, email: d.email,
+    ...(d.role && !isSelfEdit ? { role: d.role } : {}),
+    studentId: d.studentId || null,
+    ...(d.isActive !== undefined && !isSelfEdit ? { isActive: !!d.isActive } : {}),
+    ...(d.password ? { password: d.password } : {}),
   }));
 }
 

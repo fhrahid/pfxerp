@@ -3,7 +3,7 @@ import { UserRole } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppException } from '../../common/exceptions/app.exception';
-import { isAllowedEmailDomain } from '../../common/types';
+import { isAllowedEmailDomain, isExecRole } from '../../common/types';
 
 export interface CreateUserDto {
   email: string;
@@ -94,9 +94,35 @@ export class UsersService {
     return this.safe(user);
   }
 
-  async updateUser(userId: string, dto: UpdateUserDto, caller?: { role: string }) {
+  async updateUser(userId: string, dto: UpdateUserDto, caller?: { id?: string; role: string }) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
+
+    /*
+     * RBAC hierarchy (separation of duties, security.md §4):
+     * - The CEO is omnipotent: they may administer ANY account, including their own.
+     * - Nobody else may touch the sitting CEO's account in any way (role, password,
+     *   email, deactivation) — this blocks both demotion and account takeover.
+     * - Executives (CFO/CTO/CPO) are protected from peer executives for the same
+     *   reason: a CPO must not be able to reset a CTO's password or demote them.
+     * - Users can never change their own role or deactivate themselves.
+     */
+    const isCeoCaller = caller?.role === UserRole.CEO;
+    const isSelf = Boolean(caller?.id && caller.id === userId);
+    if (!isCeoCaller) {
+      if (user.role === UserRole.CEO) {
+        throw new AppException('AUTHZ_FORBIDDEN', 'The CEO account can only be administered by the CEO.');
+      }
+      if (isExecRole(user.role) && !isSelf) {
+        throw new AppException('AUTHZ_FORBIDDEN', 'Executive accounts can only be administered by the CEO.');
+      }
+      if (isSelf && dto.role !== undefined && dto.role.trim().toUpperCase() !== user.role) {
+        throw new AppException('AUTHZ_FORBIDDEN', 'You cannot change your own role. Only the CEO can reassign roles.');
+      }
+      if (isSelf && dto.isActive === false) {
+        throw new AppException('AUTHZ_FORBIDDEN', 'You cannot deactivate your own account.');
+      }
+    }
 
     let assignedRole: string | undefined = undefined;
     if (dto.role) {

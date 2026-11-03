@@ -20,14 +20,20 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { UserProfileDialog } from "./user-profile-dialog";
 
-const ROLE_OPTIONS = ["DEVELOPER", "PM", "CFO", "CTO", "CPO", "CEO"].map((r) => ({
+const ALL_ROLE_OPTIONS = ["DEVELOPER", "PM", "CFO", "CTO", "CPO", "CEO"].map((r) => ({
   value: r,
   label: r,
 }));
+// Non-CEO managers may only assign these roles (enforced server-side too).
+const LIMITED_ROLE_OPTIONS = [
+  { value: "DEVELOPER", label: "DEVELOPER" },
+  { value: "PM", label: "PM" },
+];
 
 export default function PeoplePage() {
   const me = useMe();
   const users = useQuery({ queryKey: ["users"], queryFn: () => api<any[]>("GET", "/users") });
+  const isCeo = ROLES.isCEO(me.data?.role || "");
   const manage = ROLES.canManage(me.data?.role || "");
   const [copied, setCopied] = React.useState("");
   const [selectedUserId, setSelectedUserId] = React.useState<string | null>(null);
@@ -54,7 +60,7 @@ export default function PeoplePage() {
               required: true,
               value: `Pointfex-${Math.random().toString(36).slice(2, 8)}`,
             },
-            { name: "role", label: "Role", type: "select", options: ROLE_OPTIONS },
+            { name: "role", label: "Role", type: "select", options: isCeo ? ALL_ROLE_OPTIONS : LIMITED_ROLE_OPTIONS },
             { name: "studentId", label: "Student ID (optional)", placeholder: "CSE034" },
           ]}
           submitLabel="Create profile"
@@ -131,7 +137,7 @@ export default function PeoplePage() {
                       >
                         {copied === u.id ? "Copied!" : "ID"}
                       </Button>
-                      {manage ? (
+                      {manage && (isCeo || !ROLES.isExec(u.role)) ? (
                         <FormDialog
                           trigger={
                             <Button size="sm" variant="outline" className="h-8 text-xs">
@@ -139,22 +145,50 @@ export default function PeoplePage() {
                             </Button>
                           }
                           title={`Edit ${u.fullName}`}
+                          description={
+                            isCeo
+                              ? undefined
+                              : u.id === me.data?.id
+                              ? "You can update your profile details, but not your own role or account status."
+                              : "Role changes are limited to DEVELOPER and PM."
+                          }
                           fields={[
                             { name: "fullName", label: "Full name", value: u.fullName, required: true },
                             { name: "email", label: "Email", type: "email", value: u.email, required: true },
-                            { name: "role", label: "Role", type: "select", options: ROLE_OPTIONS, value: u.role },
+                            ...(isCeo || u.id !== me.data?.id
+                              ? [
+                                  {
+                                    name: "role",
+                                    label: "Role",
+                                    type: "select" as const,
+                                    options: isCeo ? ALL_ROLE_OPTIONS : LIMITED_ROLE_OPTIONS,
+                                    value: isCeo ? u.role : u.role === "PM" ? "PM" : "DEVELOPER",
+                                  },
+                                ]
+                              : []),
                             { name: "studentId", label: "Student ID", value: u.studentId || "" },
                             { name: "password", label: "New password (blank = keep)", placeholder: "min 8 chars" },
-                            { name: "isActive", label: "Active (uncheck to revoke sessions)", type: "checkbox", value: true },
+                            ...(isCeo || u.id !== me.data?.id
+                              ? [
+                                  {
+                                    name: "isActive",
+                                    label: "Active (uncheck to revoke sessions)",
+                                    type: "checkbox" as const,
+                                    value: true,
+                                  },
+                                ]
+                              : []),
                           ]}
                           submitLabel="Save changes"
                           onSubmit={(d) =>
                             api("PATCH", `/users/${u.id}`, {
                               fullName: d.fullName,
                               email: d.email,
-                              role: d.role,
+                              ...(d.role ? { role: d.role } : {}),
                               studentId: d.studentId || null,
-                              isActive: !!d.isActive,
+                              ...(d.isActive !== undefined && (isCeo || u.id !== me.data?.id)
+                                ? { isActive: !!d.isActive }
+                                : {}),
                               ...(d.password ? { password: d.password } : {}),
                             })
                           }
