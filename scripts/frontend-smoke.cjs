@@ -90,6 +90,7 @@ const responses = {
   'GET /simulation-scores': { squadLeaderboard: [{ rank: 1, squadId: 'sq1', squadName: 'Squad 1', valuation: 280000, healthStatus: 'BULLISH' }], studentScores: [{ userId: 'u1', fullName: 'Dev One', role: 'DEVELOPER', walletBalance: 3500, squadValuation: 280000, simulationScore: 94.5 }] },
   'GET /users': [ceoUser, { id: 'u2', fullName: 'Dev One', role: 'DEVELOPER', tier: 'TIER_B', email: 'd@x.dev', squadMemberships: [] }],
   'GET /settings': [{ key: 'WEEKLY_LAB_BUDGET', value: '10000', type: 'NUMBER' }],
+  'GET /settings/production-reset/status': { enabled: false, alreadyExecuted: false, preview: { users: 2, squads: 1, tasks: 0, transactions: 0, loans: 0, governanceDecisions: 0, payrollProposals: 0, balances: [] } },
 };
 
 let fetchLog = [];
@@ -162,6 +163,7 @@ function check(name, cond) {
       if (t === 'finance') check('CEO can inspect sprint rankings before approval', html.includes('View CFO rankings') && html.includes('Squad 1'));
       if (t === 'accounting') check('C-level transaction filters rendered', html.includes('All transactions') && getEl('tab-actions').innerHTML.includes('Filter transactions by user'));
       if (t === 'profile') check('self profile tools rendered', html.includes('Change password') && html.includes('activity heatmap'));
+      if (t === 'settings') check('one-time CEO reset is gated and shows preview', html.includes('Reset disabled') && html.includes('ALLOW_CEO_DATA_RESET=true'));
     } catch (e) {
       check('tab ' + t + ' rendered', false);
       console.log('      error: ' + e.message);

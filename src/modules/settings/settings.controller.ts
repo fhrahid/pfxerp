@@ -1,7 +1,8 @@
 import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
 import { IsIn, IsInt, IsString, Min, MinLength } from 'class-validator';
 import { UserRole } from '@prisma/client';
-import { Roles } from '../../common/decorators';
+import { CurrentUser, Roles } from '../../common/decorators';
+import { AuthUser } from '../../common/types';
 import { SettingsService } from './settings.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -22,6 +23,15 @@ class SetSprintDto {
   @IsInt()
   @Min(1)
   sprintNumber: number;
+}
+
+class ProductionResetDto {
+  @IsString()
+  @MinLength(8)
+  currentPassword: string;
+
+  @IsIn(['RESET_DEVELOPMENT_DATA_TO_PRODUCTION'])
+  confirmation: string;
 }
 
 @Controller('settings')
@@ -58,5 +68,17 @@ export class SettingsController {
   async setCurrentSprint(@Body() dto: SetSprintDto) {
     await this.settings.upsert('CURRENT_SPRINT', String(dto.sprintNumber), 'NUMBER');
     return { sprintNumber: dto.sprintNumber };
+  }
+
+  @Get('production-reset/status')
+  @Roles(UserRole.CEO)
+  productionResetStatus() {
+    return this.settings.productionResetStatus();
+  }
+
+  @Post('production-reset')
+  @Roles(UserRole.CEO)
+  resetProductionData(@Body() dto: ProductionResetDto, @CurrentUser() user: AuthUser) {
+    return this.settings.resetProductionData(user, dto.currentPassword, dto.confirmation);
   }
 }

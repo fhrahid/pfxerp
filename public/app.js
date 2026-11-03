@@ -2594,11 +2594,37 @@ async function viewAudit() {
 /* ------------------------------ Settings ------------------------------ */
 async function viewSettings() {
   const settings = await api('GET', '/settings');
-  C().innerHTML = `<div class="panel"><table><tr><th>Key</th><th>Type</th><th>Value</th><th></th></tr>
+  let resetStatus = null;
+  try { resetStatus = await api('GET', '/settings/production-reset/status'); } catch (_) {}
+  if (!resetStatus?.preview) resetStatus = null;
+  const resetPanel = resetStatus ? `<div class="panel reset-panel" style="margin-bottom:14px;border-color:var(--danger)">
+    <div class="top"><div><h3 style="margin:0">One-time production data reset</h3><div class="muted" style="font-size:12px;margin-top:4px">Keeps only this CEO account, system roles and business settings. Removes all squads, other users, wallets, ledger transactions, loans, payroll, governance, tasks and test data. All balances reset to zero.</div></div>
+      ${resetStatus.alreadyExecuted ? badge('ALREADY USED', 'b-red') : resetStatus.enabled ? '<button class="btn bad" onclick="uiProductionReset()">Reset all development data</button>' : '<button class="btn bad" disabled title="Enable ALLOW_CEO_DATA_RESET=true in Dokploy for the maintenance window">Reset disabled</button>'}
+    </div>
+    ${resetStatus.alreadyExecuted ? `<p class="muted" style="font-size:12px">Executed ${dt(resetStatus.executedAt)} by ${esc(resetStatus.executedBy)}. This one-time reset cannot run again.</p>` : `<div class="reset-preview"><b>Preview:</b> ${resetStatus.preview.users} users · ${resetStatus.preview.squads} squads · ${resetStatus.preview.tasks} tasks · ${resetStatus.preview.transactions} ledger transactions · ${resetStatus.preview.loans} loans · ${resetStatus.preview.governanceDecisions} governance decisions · ${resetStatus.preview.payrollProposals} payroll proposals<div style="margin-top:5px">Balances to be erased: ${(resetStatus.preview.balances || []).map((a) => `${esc(a.type)} ${money(a.total)}`).join(' · ')}</div></div><div class="muted" style="font-size:11px;margin-top:6px">Requires a verified database backup, ALLOW_CEO_DATA_RESET=true, your current CEO password and the exact confirmation phrase. A permanent reset record is retained. Disable the environment flag immediately after.</div>`}
+  </div>` : '';
+  C().innerHTML = `${resetPanel}<div class="panel"><table><tr><th>Key</th><th>Type</th><th>Value</th><th></th></tr>
     ${settings.map((s) => `<tr><td class="mono">${esc(s.key)}</td><td>${badge(s.type, 'b-gray')}</td>
       <td><input class="inp" id="set-${esc(s.key)}" value="${esc(s.value)}" style="width:220px"/></td>
       <td><button class="btn sm" onclick="uiSaveSetting('${esc(s.key)}','${esc(s.type)}')">Save</button></td></tr>`).join('')}
   </table></div>`;
+}
+
+async function uiProductionReset() {
+  if (!confirm('FINAL WARNING: This permanently removes all non-CEO users and all operational/financial history from this database. A backup must already exist. Continue?')) return;
+  const currentPassword = prompt('Enter your current CEO password:');
+  if (!currentPassword) return;
+  const confirmation = prompt('Type RESET_DEVELOPMENT_DATA_TO_PRODUCTION exactly:');
+  if (confirmation !== 'RESET_DEVELOPMENT_DATA_TO_PRODUCTION') { toast('Reset cancelled: confirmation phrase did not match', false); return; }
+  try {
+    const result = await api('POST', '/settings/production-reset', { currentPassword, confirmation });
+    toast(result.message || 'Production data reset completed');
+    S.user = await api('GET', '/auth/me');
+    await renderShell();
+    await render();
+  } catch (e) {
+    toast(e.message || 'Production reset failed', false);
+  }
 }
 
 async function uiSaveSetting(key, type) {

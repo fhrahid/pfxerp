@@ -273,6 +273,7 @@ model User {
   pmhiSnapshots           PmPerformanceSnapshot[]
   sentInvitations         Invitation[]               @relation("InvitationSender")
   passwordResets          PasswordReset[]            @relation("UserPasswordResets")
+  productionResets        ProductionResetLog[]         @relation("ProductionResetActor")
 }
 
 model Squad {
@@ -1033,4 +1034,13 @@ model Role {
   updatedAt   DateTime @updatedAt
 
   @@index([name])
+}
+
+// Preserved, one-time audit record for the destructive pre-launch reset tool.
+model ProductionResetLog {
+  id          String   @id
+  resetById   String
+  resetBy     User     @relation("ProductionResetActor", fields: [resetById], references: [id], onDelete: Restrict)
+  summary     Json
+  createdAt   DateTime @default(now())
 }
