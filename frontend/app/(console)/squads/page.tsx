@@ -54,14 +54,13 @@ export default function SquadsPage() {
           <FormDialog
             trigger={<Button size="sm" className="gap-1.5"><Plus className="h-4 w-4" /> New squad</Button>}
             title="Create squad"
-            description="The treasury is funded automatically from the system reserve."
+            description="The new treasury starts at ৳0. CFO allocates resources from Accounting."
             fields={[
               { name: "name", label: "Squad name", required: true, placeholder: "Squad 7" },
               { name: "description", label: "Description", placeholder: "Product engineering squad" },
-              { name: "initialBalance", label: "Initial treasury (৳)", type: "number", value: 100000, min: 0 },
             ]}
             submitLabel="Create squad"
-            onSubmit={(d) => api("POST", "/squads", { ...d, initialBalance: Number(d.initialBalance) })}
+            onSubmit={(d) => api("POST", "/squads", d)}
           />
           <FormDialog
             trigger={<Button size="sm" variant="outline" className="gap-1.5"><UserPlus className="h-4 w-4" /> Transfer member</Button>}

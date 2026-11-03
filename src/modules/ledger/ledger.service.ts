@@ -56,11 +56,11 @@ export class LedgerService {
     const { entries } = params;
 
     if (!entries.length) throw new BadRequestException('Transaction requires at least one entry');
-    if (entries.some((e) => !(e.amount > 0))) {
-      throw new BadRequestException('Transfer amounts must be strictly positive');
+    if (entries.some((e) => !Number.isFinite(e.amount) || !(e.amount > 0) || !Number.isSafeInteger(Math.round(e.amount * 100)) || Math.abs(e.amount * 100 - Math.round(e.amount * 100)) > 1e-7)) {
+      throw new BadRequestException('Amounts must be finite, positive and have at most two decimal places');
     }
-    if (!params.idempotencyKey) {
-      params.idempotencyKey = `auto_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    if (!params.idempotencyKey || params.idempotencyKey.length > 128) {
+      throw new BadRequestException('A stable idempotency key (1–128 characters) is required for every ledger posting');
     }
 
     const round = (n: number) => Math.round(n * 100) / 100;
@@ -74,13 +74,23 @@ export class LedgerService {
     }
 
     const post = async (tx: Prisma.TransactionClient) => {
+        // Account locks alone cannot serialize the GLOBAL hash chain.
+        // `void IS NULL` yields a supported boolean to Prisma while preserving
+        // the transaction-scoped lock until commit.
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(730023, 1) IS NULL AS locked`;
         const accountIds = [...new Set(entries.map((e) => e.accountId))].sort();
         // 1. Idempotency replay (main.md §7.3)
         const existing = await tx.ledgerTransaction.findUnique({
           where: { idempotencyKey: params.idempotencyKey },
-          include: { entries: true },
+          include: { entries: { orderBy: { sequenceNumber: 'asc' } } },
         });
         if (existing) {
+          if (existing.referenceType !== params.referenceType || existing.referenceId !== (params.referenceId ?? null) ||
+              existing.authorizedById !== params.authorizedById || existing.entries.length !== entries.length ||
+              existing.entries.some((entry, index) => entry.accountId !== entries[index].accountId ||
+                entry.direction !== entries[index].direction || Number(entry.amount) !== entries[index].amount)) {
+            throw new AppException('CONFLICT', 'Idempotency key was already used for a different transaction');
+          }
           const originalAccountIds = [...new Set(existing.entries.map((entry) => entry.accountId))].sort();
           return { transaction: existing, accountIds: originalAccountIds };
         }

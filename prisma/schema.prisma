@@ -30,6 +30,7 @@ enum AccountType {
   PERSONAL_WALLET
   SYSTEM_RESERVE
   ESCROW
+  CAPITAL_SOURCE
 }
 
 enum LedgerDirection {
@@ -57,6 +58,7 @@ enum TransactionType {
   CODE_AUDIT_FINE
   SLACKER_FINE
   SQUAD_FUNDING
+  CAPITAL_INJECTION
 }
 
 enum TaskStatus {
@@ -242,6 +244,8 @@ model User {
   ctoVerifiedTasks        Task[]                     @relation("TaskCtoVerifier")
   taskAuditEvents         TaskAuditEvent[]
   taskAssignees           TaskAssignee[]
+  requestedPoolFundings   PoolFundingRequest[] @relation("PoolFundingRequester")
+  approvedPoolFundings    PoolFundingRequest[] @relation("PoolFundingApprover")
   payrollLineItems        PayrollLineItem[]
   submittedPayrolls       PayrollProposal[]          @relation("PayrollSubmitter")
   approvedPayrolls        PayrollProposal[]          @relation("PayrollApprover")
@@ -470,6 +474,22 @@ model TaskAssignee {
   @@unique([taskId, userId])
   @@index([taskId])
   @@index([userId])
+}
+
+model PoolFundingRequest {
+  id             String   @id @default(uuid())
+  requestedById  String
+  approvedById   String?
+  amount         Decimal  @db.Decimal(14, 2)
+  memo           String   @db.VarChar(500)
+  status         String   @default("PENDING")
+  createdAt      DateTime @default(now())
+  approvedAt     DateTime?
+
+  requestedBy    User     @relation("PoolFundingRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  approvedBy     User?    @relation("PoolFundingApprover", fields: [approvedById], references: [id], onDelete: Restrict)
+
+  @@index([status, createdAt])
 }
 
 model PayrollProposal {

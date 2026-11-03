@@ -452,7 +452,11 @@ function renderShell() {
       <div id="content"></div>
     </main>`;
 }
-function setTab(id) { S.tab = id; renderShell(); render(); toggleSidebar(false); }
+function setTab(id) {
+  S.tab = id;
+  try { localStorage.setItem('pf_active_tab', id); } catch (_) {}
+  renderShell(); render(); toggleSidebar(false);
+}
 function tabActions(html) { const el = document.getElementById('tab-actions'); if (el) el.innerHTML = html; }
 const C = () => document.getElementById('content');
 
@@ -1125,11 +1129,10 @@ function uiGitRemove(squadId, repoId) {
   });
 }
 
-function uiSquadCreate() {  formModal('Create squad', [
+function uiSquadCreate() {  formModal('Create squad — treasury starts empty', [
     { name: 'name', label: 'Squad name', required: true, placeholder: 'Squad 7' },
     { name: 'description', label: 'Description', placeholder: 'Product engineering squad' },
-    { name: 'initialBalance', label: 'Initial treasury (BDT, from system reserve)', type: 'number', value: 100000 },
-  ], 'Create squad', (d) => act('POST', '/squads', { ...d, initialBalance: +d.initialBalance }));
+  ], 'Create squad', (d) => act('POST', '/squads', d));
 }
 
 function uiSquadEdit(id, name, description, isActive) {
@@ -1858,8 +1861,8 @@ async function viewPayroll() {
     <div class="list-item"><div class="top">
       <div><b>${esc(p.squad?.name || '')}</b> · Lab ${p.labNumber} · ${money(p.totalProposed)}</div>
       <div class="row">${statusBadge(p.status)}
-        ${isCPO() && p.status === 'SUBMITTED' ? `<button class="btn good sm" onclick="act('POST','/payroll/${p.id}/approve',null,true)">Approve & disburse</button>
-          <button class="btn bad sm" onclick="uiPayrollReject('${p.id}')">Reject</button>` : ''}
+        ${(isCEO() || (isPM() && mySquads().some((s) => s.id === p.squadId))) && p.status === 'SUBMITTED' ? `<button class="btn good sm" onclick="act('POST','/payroll/${p.id}/approve',null,true)">${isPM() ? 'Disburse salary' : 'CEO override: disburse'}</button>` : ''}
+        ${isCPO() && p.status === 'SUBMITTED' ? `<button class="btn bad sm" onclick="uiPayrollReject('${p.id}')">Reject</button>` : ''}
       </div></div>
       <div class="itemlist">${p.lineItems.map((li) => `<div class="muted" style="font-size:12.5px">${esc(li.user?.fullName || li.userId)} — ${esc(li.tier)} · ${money(li.amount)} <i>${esc(li.justification || '')}</i></div>`).join('')}</div>
     </div>`).join('') : '<div class="panel empty">No proposals</div>';
@@ -2450,6 +2453,10 @@ async function uiSaveSetting(key, type) {
 async function boot() {
   try {
     S.user = await api('GET', '/auth/me');
+    try {
+      const savedTab = localStorage.getItem('pf_active_tab');
+      if (savedTab && TABS.some((item) => item.id === savedTab && item.show())) S.tab = savedTab;
+    } catch (_) {}
     renderShell();
     await render();
   } catch (e) {

@@ -36,7 +36,7 @@ export class AuthService {
     // otherwise an identical refresh JWT could be replayed as "the new" token.
     const refreshToken = await this.jwt.signAsync(
       { sub: user.id, typ: 'refresh', jti: randomUUID() },
-      { expiresIn: process.env.REFRESH_TOKEN_EXPIRES_IN || '7d' },
+      { expiresIn: (process.env.REFRESH_TOKEN_EXPIRES_IN || '7d') as any },
     );
 
     // bcrypt silently truncates input at 72 bytes; JWTs are longer, so two different
@@ -152,6 +152,18 @@ export class AuthService {
   async logout(userId: string) {
     await this.prisma.user.update({ where: { id: userId }, data: { refreshTokenHash: null } });
     return { loggedOut: true };
+  }
+
+  async changePassword(userId: string, currentPassword: string, newPassword: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.isActive) throw new AppException('AUTH_INVALID_CREDENTIALS', 'Current password is incorrect');
+    if (!(await bcrypt.compare(currentPassword, user.passwordHash))) {
+      throw new AppException('AUTH_INVALID_CREDENTIALS', 'Current password is incorrect');
+    }
+    if (currentPassword === newPassword) throw new AppException('VALIDATION_FAILED', 'Choose a different password');
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await this.prisma.user.update({ where: { id: userId }, data: { passwordHash, refreshTokenHash: null } });
+    return { success: true, message: 'Password changed. Sign in again on other devices.' };
   }
 
   /**

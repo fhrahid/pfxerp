@@ -16,8 +16,53 @@ import '../src/env';
 import { PrismaClient, AccountType, UserRole, SquadRole, CertificationType } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { randomBytes } from 'crypto';
+import { createHash, createHmac } from 'crypto';
 
 const prisma = new PrismaClient();
+const GENESIS_HASH = '0'.repeat(64);
+
+/** Record a balanced, HMAC-chained opening entry for bootstrap reserve cash. */
+async function recordReserveOpening(ceoId: string) {
+  const secret = process.env.LEDGER_SECRET_KEY;
+  if (!secret || secret.length < 64) throw new Error('LEDGER_SECRET_KEY is required to create the opening ledger entry');
+  await prisma.$transaction(async (tx) => {
+    // Serialize bootstrap against other replicas and all ledger posters.
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(730023, 1) IS NULL AS locked`;
+    const assets = await tx.account.findMany({ where: { type: { not: AccountType.CAPITAL_SOURCE } }, orderBy: { id: 'asc' } });
+    const openingAssets: typeof assets = [];
+    for (const account of assets) {
+      if (Number(account.balance) > 0 && !(await tx.ledgerEntry.count({ where: { accountId: account.id } }))) openingAssets.push(account);
+    }
+    if (!openingAssets.length) return;
+    // Only record positive balances not already represented in the chain.
+    const amount = openingAssets.reduce((sum, account) => sum + Number(account.balance), 0);
+    const capital = await tx.account.findFirst({ where: { type: AccountType.CAPITAL_SOURCE } }) ||
+      await tx.account.create({ data: { type: AccountType.CAPITAL_SOURCE, balance: 0, currency: 'BDT' } });
+    const last = await tx.ledgerEntry.findFirst({ orderBy: { sequenceNumber: 'desc' }, select: { entryHash: true } });
+    let previous = last?.entryHash || GENESIS_HASH;
+    const createdAt = new Date();
+    const entries = [
+      { accountId: capital.id, direction: 'DEBIT' as const, amount },
+      ...openingAssets.map((asset) => ({ accountId: asset.id, direction: 'CREDIT' as const, amount: Number(asset.balance) })),
+    ].map((entry) => {
+      const entryHash = createHmac('sha256', secret)
+        .update(`${previous}:${entry.accountId}:${entry.direction}:${entry.amount.toFixed(2)}:${createdAt.toISOString()}`)
+        .digest('hex');
+      const row = { ...entry, prevHash: previous, entryHash, createdAt };
+      previous = entryHash;
+      return row;
+    });
+    await tx.account.update({ where: { id: capital.id }, data: { balance: { decrement: amount } } });
+    await tx.ledgerTransaction.create({
+      data: {
+        idempotencyKey: `genesis_opening_${createHash('sha256').update(openingAssets.map((a) => a.id).join(',')).digest('hex').slice(0, 24)}`,
+        referenceType: 'CAPITAL_INJECTION', referenceId: 'GENESIS',
+        description: 'Opening cash balances established at genesis bootstrap', authorizedById: ceoId,
+        entries: { create: entries },
+      },
+    });
+  });
+}
 
 async function upsertUser(data: { email: string; fullName: string; role: UserRole | string; studentId?: string; password: string }) {
   const passwordHash = await bcrypt.hash(data.password, 12);
@@ -65,7 +110,7 @@ export async function runBootstrapSeed() {
   // 1. CEO (Course Faculty) — credentials from env; random password printed if not provided
   const ceoEmail = process.env.INITIAL_CEO_EMAIL || 'noor@seu.edu.bd';
   const ceoPassword = process.env.INITIAL_CEO_PASSWORD || randomBytes(12).toString('hex');
-  await upsertUser({ email: ceoEmail, fullName: 'Chief Executive Officer', role: UserRole.CEO, password: ceoPassword });
+  const ceo = await upsertUser({ email: ceoEmail, fullName: 'Chief Executive Officer', role: UserRole.CEO, password: ceoPassword });
 
   // 2. System Reserve + Escrow accounts
   const reserveFund = Number(process.env.INITIAL_SYSTEM_RESERVE_FUND || 5000000);
@@ -82,7 +127,6 @@ export async function runBootstrapSeed() {
 
   // 3. Core System Settings
   const defaultSettings: { key: string; value: string; type: string }[] = [
-    { key: 'SQUAD_INITIAL_BALANCE', value: '100000', type: 'NUMBER' },
     { key: 'WEEKLY_LAB_BUDGET', value: '10000', type: 'NUMBER' },
     { key: 'SPRINT_POOL_TOTAL', value: '150000', type: 'NUMBER' },
     { key: 'SPRINT_PAYOUT_DISTRIBUTION', value: '[50000,35000,25000,20000,15000,5000]', type: 'JSON' },
@@ -123,6 +167,8 @@ export async function runBootstrapSeed() {
     await prisma.systemSetting.upsert({ where: { key: s.key }, update: {}, create: s });
   }
 
+  await recordReserveOpening(ceo.id);
+
   console.log(`CEO account: ${ceoEmail} / ${process.env.INITIAL_CEO_PASSWORD ? '(password from INITIAL_CEO_PASSWORD)' : ceoPassword}`);
   console.log(`System Reserve: BDT ${systemReserve.balance} | Escrow account: provisioned`);
 }
@@ -155,7 +201,7 @@ export async function runDemoSeed() {
   }
 
   // 6 product squads: treasury + 1 PM + 4 developers each
-  const initialBalance = 100000;
+  const initialBalance = 0;
   let studentSeq = 4;
   for (let i = 1; i <= 6; i++) {
     const squad = await prisma.squad.upsert({

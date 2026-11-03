@@ -80,6 +80,20 @@ export class DashboardService {
       where: { isActive: true },
       include: { account: true, borrowedLoans: { where: { status: 'ACTIVE', repaidAt: null } } },
     });
+    const [taskCounts, openTaskCounts, overdueCounts] = await Promise.all([
+      this.prisma.task.groupBy({ by: ['squadId'], _count: { id: true } }),
+      this.prisma.task.groupBy({
+        by: ['squadId'], where: { status: { notIn: ['CTO_VERIFIED', 'CLOSED'] } }, _count: { id: true },
+      }),
+      this.prisma.task.groupBy({
+        by: ['squadId'],
+        where: { status: { notIn: ['CTO_VERIFIED', 'CLOSED'] }, dueDate: { lt: new Date() } },
+        _count: { id: true },
+      }),
+    ]);
+    const taskCountBySquad = new Map(taskCounts.map((x) => [x.squadId, x._count.id]));
+    const openTaskCountBySquad = new Map(openTaskCounts.map((x) => [x.squadId, x._count.id]));
+    const overdueBySquad = new Map(overdueCounts.map((x) => [x.squadId, x._count.id]));
 
     return Promise.all(
       squads.map(async (squad) => {
@@ -158,6 +172,9 @@ export class DashboardService {
           valuation,
           runwayPeriods: Math.round(runway * 10) / 10,
           health,
+          taskCount: taskCountBySquad.get(squad.id) || 0,
+          openTaskCount: openTaskCountBySquad.get(squad.id) || 0,
+          overdueTaskCount: overdueBySquad.get(squad.id) || 0,
           activeDebt: squad.borrowedLoans.reduce((a, l) => a + Number(l.totalDue), 0),
         };
       }),

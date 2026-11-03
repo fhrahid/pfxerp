@@ -25,6 +25,8 @@ import {
   LogOut,
   Menu,
   X,
+  Sun,
+  Moon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn, taka } from "@/lib/utils";
@@ -50,6 +52,8 @@ const NAV = [
   { href: "/people", label: "People", icon: UserCog, roles: ["CEO", "CFO", "CTO", "CPO"] },
   { href: "/payroll", label: "Payroll", icon: Wallet, roles: ["PM", "CPO", "CEO"] },
   { href: "/finance", label: "Finance", icon: Landmark, roles: ["CEO", "CFO", "CTO", "CPO", "PM"] },
+  { href: "/accounting", label: "Accounting", icon: Landmark, roles: null },
+  { href: "/profile", label: "My Profile", icon: UserCog, roles: null },
   { href: "/governance", label: "Governance", icon: Scale, roles: ["CEO", "CFO", "CTO", "CPO"] },
   { href: "/marketplace", label: "Marketplace", icon: Store, roles: null },
   { href: "/consultancy", label: "Consultancy", icon: MessageSquareCode, roles: null },
@@ -116,9 +120,24 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const sprint = useSprint();
   const role = me.data?.role || "";
   const [mobileOpen, setMobileOpen] = React.useState(false);
+  const [lightMode, setLightMode] = React.useState(true);
   const menuButton = React.useRef<HTMLButtonElement>(null);
   const closeButton = React.useRef<HTMLButtonElement>(null);
   const mobileNavigation = React.useRef<HTMLElement>(null);
+
+  React.useEffect(() => {
+    const saved = localStorage.getItem("pf_theme");
+    const light = saved !== "dark";
+    setLightMode(light);
+    document.documentElement.classList.toggle("dark", !light);
+  }, []);
+
+  const toggleTheme = () => {
+    const nextLight = !lightMode;
+    setLightMode(nextLight);
+    document.documentElement.classList.toggle("dark", !nextLight);
+    localStorage.setItem("pf_theme", nextLight ? "light" : "dark");
+  };
 
   React.useEffect(() => {
     setMobileOpen(false);
@@ -315,6 +334,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
             <PageTitle pathname={pathname} />
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            <Button variant="ghost" size="icon" onClick={toggleTheme} aria-label={lightMode ? "Switch to dark mode" : "Switch to light mode"} title={lightMode ? "Dark mode" : "Light mode"}>
+              {lightMode ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+            </Button>
             {ROLES.isExec(role) ? (
               <FormDialog
                 trigger={

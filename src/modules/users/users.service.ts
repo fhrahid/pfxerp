@@ -219,6 +219,16 @@ export class UsersService {
       throw new AppException('AUTHZ_FORBIDDEN', 'CEO accounts cannot be deleted. Transfer leadership first.');
     }
 
+    // Both wallet entries and transactions authorized by this person belong
+    // to the global immutable hash chain. Deactivate instead of erasing them.
+    const financialHistory = await this.prisma.ledgerTransaction.count({ where: { authorizedById: userId } });
+    const walletHistory = user.account
+      ? await this.prisma.ledgerEntry.count({ where: { accountId: user.account.id } })
+      : 0;
+    if (financialHistory || walletHistory) {
+      throw new BadRequestException('User has financial history. Deactivate instead; ledger entries must never be deleted.');
+    }
+
     await this.prisma.$transaction(async (tx) => {
       // 1. audit the destructive action BEFORE removing its subject
       await tx.executiveAuditLog.create({
@@ -237,8 +247,6 @@ export class UsersService {
       });
 
       // 2. records the schema pins with Restrict — authored by this user
-      await tx.ledgerEntry.deleteMany({ where: { transaction: { authorizedById: userId } } });
-      await tx.ledgerTransaction.deleteMany({ where: { authorizedById: userId } });
       await tx.notice.deleteMany({ where: { OR: [{ senderId: userId }, { recipientId: userId }] } });
       await tx.bugReport.deleteMany({ where: { reportingUserId: userId } });
       await tx.codeAuditCitation.deleteMany({ where: { citedById: userId } });
@@ -249,13 +257,7 @@ export class UsersService {
       await tx.developerPerformanceSnapshot.deleteMany({ where: { userId } });
       await tx.pmPerformanceSnapshot.deleteMany({ where: { userId } });
 
-      // 3. ledger entries on the user's personal wallet (Restrict on Account)
-      if (user.account) {
-        await tx.ledgerEntry.deleteMany({ where: { accountId: user.account.id } });
-        await tx.ledgerTransaction.deleteMany({ where: { entries: { none: {} } } });
-      }
-
-      // 4. Prisma cascades the rest: wallet, memberships, task audit events,
+      // Prisma cascades the rest: wallet, memberships, task audit events,
       //    task references SetNull, invitations sent, password resets, votes…
       await tx.user.delete({ where: { id: userId } });
     });
@@ -287,7 +289,7 @@ export class UsersService {
 
     const [assignedTasks, createdTasks, dpiSnapshots, pmhiSnapshots, citations] = await Promise.all([
       this.prisma.task.findMany({
-        where: { assignedToId: userId },
+        where: { OR: [{ assignedToId: userId }, { assignees: { some: { userId } } }] },
         include: {
           squad: { select: { id: true, name: true } },
         },
@@ -324,6 +326,17 @@ export class UsersService {
         orderBy: { createdAt: 'desc' },
       }),
     ]);
+
+    const activityHeatmap = await this.prisma.$queryRaw<Array<{ day: Date; count: bigint }>>`
+      SELECT DATE("createdAt") AS day, COUNT(*)::bigint AS count
+      FROM "TaskAuditEvent"
+      WHERE "changedById" = ${userId} AND "createdAt" >= NOW() - INTERVAL '365 days'
+      GROUP BY DATE("createdAt") ORDER BY day ASC
+    `;
+    const recentActivity = await this.prisma.taskAuditEvent.findMany({
+      where: { changedById: userId }, orderBy: { createdAt: 'desc' }, take: 30,
+      include: { task: { select: { id: true, title: true, squadId: true } } },
+    });
 
     const now = new Date();
     let totalAssigned = assignedTasks.length;
@@ -548,6 +561,11 @@ export class UsersService {
       dpiSnapshots,
       pmhiSnapshots,
       citations,
+      activityHeatmap: activityHeatmap.map((row) => ({
+        date: new Date(row.day).toISOString().slice(0, 10),
+        count: Number(row.count),
+      })),
+      recentActivity,
       slackerFines,
       pmDetails,
       executiveDetails,

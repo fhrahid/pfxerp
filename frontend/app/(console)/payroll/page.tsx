@@ -68,18 +68,18 @@ export default function PayrollPage() {
                 </CardTitle>
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant={statusVariant(p.status)}>{p.status}</Badge>
-                  {ROLES.isCPO(role) && p.status === "SUBMITTED" ? (
+                  {(ROLES.isCEO(role) || (ROLES.isPM(role) && (me.data?.squadMemberships || []).some((m: any) => m.squad.id === p.squadId && m.role === "PM"))) && p.status === "SUBMITTED" ? (
                     <>
-                      <Button size="sm" variant="success" onClick={() => action("POST", `/payroll/${p.id}/approve`, undefined, true, "Disbursed")}>
-                        Approve & disburse
+                      <Button size="sm" variant="success" onClick={() => action("POST", `/payroll/${p.id}/approve`, undefined, true, ROLES.isPM(role) ? "Salary disbursed" : "Approved & disbursed")}>
+                        {ROLES.isPM(role) ? "Disburse salary" : "CEO override: disburse"}
                       </Button>
-                      <FormDialog
+                      {isChro ? <FormDialog
                         trigger={<Button size="sm" variant="destructive">Reject</Button>}
                         title="Reject payroll proposal"
                         fields={[{ name: "reason", label: "Reason", type: "textarea", required: true }]}
                         submitLabel="Reject"
                         onSubmit={(d) => api("POST", `/payroll/${p.id}/reject`, d)}
-                      />
+                      /> : null}
                     </>
                   ) : null}
                 </div>

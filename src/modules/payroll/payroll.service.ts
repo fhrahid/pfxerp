@@ -103,8 +103,20 @@ export class PayrollService {
   }
 
   /** API-CHRO-02: approve + atomic batch disbursement (idempotent replay per main.md §7.3). */
-  async approveAndDisburse(cpoUserId: string, proposalId: string) {
+  async approveAndDisburse(approver: AuthUser, proposalId: string) {
+    const approverId = approver.id;
     const replayKey = `payroll_${proposalId}`;
+
+    // Authorize before idempotent replay as well as inside the transaction;
+    // otherwise a PM could probe/replay another squad's completed payroll.
+    const scopeProposal = await this.prisma.payrollProposal.findUnique({ where: { id: proposalId }, select: { squadId: true } });
+    if (!scopeProposal) throw new NotFoundException('Proposal not found');
+    if (approver.role === UserRole.PM) {
+      const membership = await this.prisma.squadMembership.findFirst({ where: { userId: approver.id, squadId: scopeProposal.squadId, role: 'PM', leftAt: null } });
+      if (!membership) throw new ForbiddenException('Only this squad\'s PM may disburse from its treasury');
+    } else if (approver.role !== UserRole.CEO) {
+      throw new ForbiddenException('Only the squad PM or CEO may disburse payroll');
+    }
 
     // Idempotent replay: if this exact key already settled the ledger, return the original outcome
     const existingTx = await this.prisma.ledgerTransaction.findUnique({
@@ -137,15 +149,27 @@ export class PayrollService {
       });
       if (!proposal) throw new NotFoundException('Proposal not found');
       if (!proposal.squad.account) throw new BadRequestException('Squad treasury account missing');
+      if (approver.role === UserRole.PM) {
+        const membership = await tx.squadMembership.findFirst({
+          where: { userId: approver.id, squadId: proposal.squadId, role: 'PM', leftAt: null },
+        });
+        if (!membership) throw new ForbiddenException('Only this squad\'s PM may disburse from its treasury');
+      } else if (approver.role !== UserRole.CEO) {
+        throw new ForbiddenException('Only the squad PM or CEO may disburse payroll');
+      }
 
       const paidItems = proposal.lineItems.filter((i) => Number(i.amount) > 0);
       for (const item of paidItems) {
+        const activeMember = await tx.squadMembership.findFirst({
+          where: { userId: item.userId, squadId: proposal.squadId, leftAt: null }, select: { id: true },
+        });
+        if (!activeMember) throw new BadRequestException(`Payroll recipient ${item.userId} is no longer an active squad member`);
         if (!item.user.account) throw new BadRequestException(`User ${item.userId} has no personal wallet`);
       }
 
       const claimed = await tx.payrollProposal.updateMany({
         where: { id: proposalId, status: 'SUBMITTED' },
-        data: { status: 'APPROVED', approvedById: cpoUserId },
+        data: { status: 'APPROVED', approvedById: approverId },
       });
       if (!claimed.count) throw new AppException('PAYROLL_ALREADY_APPROVED', `Proposal is ${proposal.status}`);
 
@@ -165,14 +189,14 @@ export class PayrollService {
         referenceId: proposal.id,
         description: `Lab ${proposal.labNumber} payroll batch for ${proposal.squad.name}`,
         idempotencyKey: replayKey,
-        authorizedById: cpoUserId,
+        authorizedById: approverId,
       }, tx);
 
       await tx.executiveAuditLog.create({
         data: {
-          executiveId: cpoUserId,
-          executiveRole: 'CPO',
-          actionType: 'APPROVE_PAYROLL',
+          executiveId: approverId,
+          executiveRole: approver.role as UserRole,
+          actionType: 'PAYROLL_DISBURSED',
           payloadSnapshot: {
             proposalId,
             squadId: proposal.squadId,

@@ -79,9 +79,10 @@ export class SquadsService {
     };
   }
 
-  /** CPO/CEO: create a squad + treasury, optionally funded from SYSTEM_RESERVE. */
+  /** Create an empty treasury; funding is a separate CFO-authorized ledger transfer. */
   async createSquad(user: { id: string }, dto: { name: string; description?: string; initialBalance?: number }) {
-    const initial = dto.initialBalance ?? (await this.settings.getNumber('SQUAD_INITIAL_BALANCE', 100000));
+    if (dto.initialBalance) throw new BadRequestException('New squad treasuries start empty; ask the CFO to allocate funds');
+    const initial = 0;
     const created = await this.prisma.$transaction(async (tx) => {
       const existing = await tx.squad.findUnique({ where: { name: dto.name } });
       if (existing) throw new AppException('CONFLICT', `A squad named "${dto.name}" already exists`);
@@ -144,6 +145,12 @@ export class SquadsService {
     });
     if (!squad) throw new NotFoundException('Squad not found');
 
+    // A ledger entry is part of a GLOBAL HMAC chain. Deleting even one row
+    // invalidates every subsequent hash and destroys financial evidence.
+    if (squad.account && await this.prisma.ledgerEntry.count({ where: { accountId: squad.account.id } })) {
+      throw new BadRequestException('Squad has financial history. Deactivate it instead; ledger entries must never be deleted.');
+    }
+
     await this.prisma.$transaction(async (tx) => {
       // 1. record the destructive action BEFORE removing its subject
       await tx.executiveAuditLog.create({
@@ -162,15 +169,7 @@ export class SquadsService {
         },
       });
 
-      // 2. ledger: entries first (Restrict on Account), then orphaned transactions
-      if (squad.account) {
-        await tx.ledgerEntry.deleteMany({ where: { accountId: squad.account.id } });
-      }
-      await tx.ledgerTransaction.deleteMany({
-        where: { entries: { none: {} } },
-      });
-
-      // 3. Prisma cascades the rest: account, memberships, tasks (+audit),
+      // Prisma cascades account, memberships, tasks (+audit),
       //    payroll proposals, sprint participants, repositories, etc.
       await tx.squad.delete({ where: { id: squadId } });
     });

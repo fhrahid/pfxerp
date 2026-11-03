@@ -40,6 +40,16 @@ class ResetPasswordDto {
   password: string;
 }
 
+class ChangePasswordDto {
+  @IsString()
+  @IsNotEmpty()
+  currentPassword: string;
+
+  @IsString()
+  @MinLength(12, { message: 'New password must be at least 12 characters long' })
+  newPassword: string;
+}
+
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
@@ -67,6 +77,12 @@ export class AuthController {
   @Post('logout')
   logout(@CurrentUser() user: AuthUser) {
     return this.auth.logout(user.id);
+  }
+
+  @HttpCode(200)
+  @Post('change-password')
+  changePassword(@Body() dto: ChangePasswordDto, @CurrentUser() user: AuthUser) {
+    return this.auth.changePassword(user.id, dto.currentPassword, dto.newPassword);
   }
 
   @Public()
