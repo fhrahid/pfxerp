@@ -59,6 +59,8 @@ enum TransactionType {
   SLACKER_FINE
   SQUAD_FUNDING
   CAPITAL_INJECTION
+  RESERVE_SWEEP
+  PERSONAL_FUNDING
 }
 
 enum TaskStatus {

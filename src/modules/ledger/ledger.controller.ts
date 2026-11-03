@@ -1,6 +1,6 @@
 import { Body, Controller, ForbiddenException, Get, Param, Post, Query, Headers, BadRequestException } from '@nestjs/common';
-import { IsBoolean, IsNumber, IsString, IsUUID, Min, MinLength } from 'class-validator';
-import { UserRole } from '@prisma/client';
+import { IsBoolean, IsIn, IsNumber, IsString, IsUUID, Min, MinLength } from 'class-validator';
+import { TransactionType, UserRole } from '@prisma/client';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Roles, CurrentUser } from '../../common/decorators';
 import { AuthUser } from '../../common/types';
@@ -20,6 +20,15 @@ class FreezeDto {
 class AllocateDto {
   @IsUUID()
   squadId: string;
+
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
+  amount: number;
+}
+
+class AllocatePersonalDto {
+  @IsUUID()
+  userId: string;
 
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0.01)
@@ -46,6 +55,11 @@ class PoolFundingDto {
   memo: string;
 }
 
+class ReserveSweepDto {
+  @IsIn(['RETURN_ALL_FUNDS_TO_RESERVE'])
+  confirmation: string;
+}
+
 @ApiTags('ledger')
 @ApiBearerAuth()
 @Controller()
@@ -64,9 +78,14 @@ export class LedgerController {
 
   @Get('ledger/transactions')
   @Roles(UserRole.CEO, UserRole.CFO)
-  recent(@Query('limit') limit?: string) {
+  recent(@Query('limit') limit?: string, @Query('referenceType') referenceType?: string, @Query('userId') userId?: string) {
     const parsed = Number(limit);
-    return this.ledger.recentTransactions(Number.isFinite(parsed) ? Math.max(1, Math.min(Math.trunc(parsed), 100)) : 25);
+    if (referenceType && !Object.values(TransactionType).includes(referenceType as TransactionType)) throw new BadRequestException('Invalid transaction action filter');
+    if (userId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId)) throw new BadRequestException('userId must be a UUID');
+    return this.ledger.recentTransactions(
+      Number.isFinite(parsed) ? Math.max(1, Math.min(Math.trunc(parsed), 100)) : 25,
+      { referenceType: referenceType as TransactionType | undefined, userId },
+    );
   }
 
   /** CFO moves existing reserve funds into an active squad treasury. No minting. */
@@ -92,6 +111,29 @@ export class LedgerController {
     return { transactionId: tx.id, squadId: squad.id, amount: dto.amount };
   }
 
+  @Post('ledger/allocate-personal')
+  @Roles(UserRole.CFO)
+  async allocatePersonal(@Body() dto: AllocatePersonalDto, @CurrentUser() user: AuthUser, @Headers('x-idempotency-key') key?: string) {
+    if (user.role !== UserRole.CFO && user.role !== UserRole.CEO) throw new ForbiddenException();
+    if (!key || !/^[\w.-]{12,96}$/.test(key)) throw new BadRequestException('A unique X-Idempotency-Key (12–96 characters) is required');
+    const recipient = await this.prisma.user.findUnique({ where: { id: dto.userId }, include: { account: true } });
+    if (!recipient || !recipient.isActive || !recipient.account || recipient.account.type !== 'PERSONAL_WALLET') {
+      throw new BadRequestException('Active user personal wallet not found');
+    }
+    const reserve = await this.ledger.systemReserve();
+    const tx = await this.ledger.executeDoubleEntryTransfer({
+      senderAccountId: reserve.id,
+      recipientAccountId: recipient.account.id,
+      amount: dto.amount,
+      referenceType: 'PERSONAL_FUNDING',
+      referenceId: recipient.id,
+      description: `CFO/CEO personal wallet allocation to ${recipient.fullName}`,
+      idempotencyKey: `personal_allocation_${key}`,
+      authorizedById: user.id,
+    });
+    return { transactionId: tx.id, userId: recipient.id, amount: dto.amount };
+  }
+
   /** Return unspent squad treasury to reserve before a controlled reallocation. */
   @Post('ledger/squads/:id/return-funds')
   @Roles(UserRole.CFO)
@@ -108,6 +150,15 @@ export class LedgerController {
       idempotencyKey: `squad_return_${key}`, authorizedById: user.id,
     });
     return { transactionId: tx.id, squadId, amount };
+  }
+
+  /** CEO-only, atomic, fully ledgered return of all positive personal/squad balances. */
+  @Post('ledger/reserve/sweep')
+  @Roles(UserRole.CEO)
+  sweepAllFunds(@Body() dto: ReserveSweepDto, @CurrentUser() user: AuthUser, @Headers('x-idempotency-key') key?: string) {
+    if (user.role !== UserRole.CEO || dto.confirmation !== 'RETURN_ALL_FUNDS_TO_RESERVE') throw new ForbiddenException('CEO confirmation required');
+    if (!key || !/^[\w.-]{12,96}$/.test(key)) throw new BadRequestException('A unique X-Idempotency-Key (12–96 characters) is required');
+    return this.ledger.sweepAllUserAndSquadFunds(user.id, `sweep_${key}`);
   }
 
   /** Accounting visibility: CEO/CFO all; PM own squad treasury + own wallet; others own wallet. */

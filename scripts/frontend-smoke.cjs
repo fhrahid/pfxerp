@@ -70,7 +70,7 @@ const responses = {
   'GET /tasks/t1': { ...tasks[0], assignedToId: 'u-dev' },
   'GET /payroll?status=SUBMITTED': [{ id: 'p1', squadId: 'sq1', squad: { name: 'Squad 1' }, labNumber: 1, totalProposed: 5500, status: 'SUBMITTED', lineItems: [{ user: { fullName: 'Dev One' }, tier: 'REGULAR', amount: 2000 }] }],
   'GET /payroll': [],
-  'GET /sprint-payouts': [{ id: 'sp1', sprintNumber: 1, status: 'PROPOSED', totalPool: 150000, items: [] }],
+  'GET /sprint-payouts': [{ id: 'sp1', sprintNumber: 1, status: 'PROPOSED', totalPool: 150000, items: [{ rank: 1, squadId: 'sq1', squad: { id: 'sq1', name: 'Squad 1' }, grossAmount: 50000, taxAmount: 2500, netAmount: 47500, pmBonusAmount: 0 }] }],
   'GET /loans': [{ id: 'l1', borrowerSquad: { name: 'Squad 4' }, principalAmount: 20000, totalDue: 23000, status: 'ACTIVE', disbursedAt: null }],
   'GET /equity': { stakes: [{ squad: { name: 'Squad 2' }, stakePercent: 0.1, investedAmount: 15000, sprintNumber: 1, isActive: true }], dividendsReceived: 500 },
   'GET /ledger/transactions?limit=15': [{ id: 'tx1', createdAt: new Date().toISOString(), referenceType: 'PAYROLL', description: 'payroll', entries: [{ direction: 'DEBIT', amount: 5500 }] }],
@@ -118,6 +118,7 @@ const sandbox = {
   document: documentStub,
   localStorage: { getItem: (k) => (storage.has(k) ? storage.get(k) : null), setItem: (k, v) => storage.set(k, v), removeItem: (k) => storage.delete(k) },
   fetch: fetchStub,
+  URLSearchParams,
   crypto: { randomUUID: () => 'uuid-' + Math.random() },
   FormData: class { constructor(f) { this._f = f; } get(n) { const el = this._f?.elements?.[n]; return el ? el.value : ''; } entries() { return [][Symbol.iterator](); } },
   setTimeout, clearTimeout,
@@ -158,6 +159,9 @@ function check(name, cond) {
       await new Promise((r) => setTimeout(r, 80));
       const html = getEl('content').innerHTML;
       check('tab ' + t + ' rendered (' + html.length + ' chars)', html.length > 50);
+      if (t === 'finance') check('CEO can inspect sprint rankings before approval', html.includes('View CFO rankings') && html.includes('Squad 1'));
+      if (t === 'accounting') check('C-level transaction filters rendered', html.includes('All transactions') && getEl('tab-actions').innerHTML.includes('Filter transactions by user'));
+      if (t === 'profile') check('self profile tools rendered', html.includes('Change password') && html.includes('activity heatmap'));
     } catch (e) {
       check('tab ' + t + ' rendered', false);
       console.log('      error: ' + e.message);

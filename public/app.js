@@ -1984,9 +1984,18 @@ async function viewAccounting() {
   const selected = accounts.find((a) => a.id === S.accountId) || accounts[0];
   if (selected) S.accountId = selected.id;
   const entries = selected ? await api('GET', `/ledger/accounts/${selected.id}/entries`) : [];
+  const globalView = isCEO() || isCFO();
+  let globalTransactions = [], transactionUsers = [];
+  if (globalView) {
+    try { transactionUsers = await api('GET', '/users'); } catch (_) {}
+    const filters = new URLSearchParams({ limit: '100' });
+    if (S.ledgerAction) filters.set('referenceType', S.ledgerAction);
+    if (S.ledgerUser) filters.set('userId', S.ledgerUser);
+    try { globalTransactions = await api('GET', `/ledger/transactions?${filters.toString()}`); } catch (_) {}
+  }
   let requests = [];
   if (isCEO() || isCFO()) { try { requests = await api('GET', '/ledger/pool-funding/requests'); } catch (_) {} }
-  tabActions(`${isCFO() ? `<button class="btn primary" onclick="uiAccountingAllocate()">Allocate to squad</button><button class="btn" onclick="uiPoolFundingRequest()">Request pool funding</button>` : ''}${isCEO() ? '<button class="btn primary" onclick="uiPoolFundingDirect()">Add external pool capital</button>' : ''}`);
+  tabActions(`${globalView ? `<select class="inp ledger-filter" aria-label="Filter transactions by action" onchange="S.ledgerAction=this.value;viewAccounting()"><option value="">All actions</option>${['PAYROLL','SPRINT_PAYOUT','SQUAD_FUNDING','PERSONAL_FUNDING','CAPITAL_INJECTION','RESERVE_SWEEP','CEO_BONUS','TAX','FINE','SLACKER_FINE','LOAN_DISBURSEMENT','LOAN_REPAYMENT','EQUITY_INVESTMENT','EQUITY_DIVIDEND','MARKETPLACE_PURCHASE','CONSULTANCY','BOUNTY','ESCROW_DEPOSIT','ESCROW_RELEASE','CHAOS_PENALTY','SWAP_FEE'].map((a) => `<option value="${a}" ${S.ledgerAction === a ? 'selected' : ''}>${a.replace(/_/g, ' ')}</option>`).join('')}</select><select class="inp ledger-filter" aria-label="Filter transactions by user" onchange="S.ledgerUser=this.value;viewAccounting()"><option value="">All users</option>${transactionUsers.map((u) => `<option value="${u.id}" ${S.ledgerUser === u.id ? 'selected' : ''}>${esc(u.fullName)} (${esc(u.role)})</option>`).join('')}</select>` : ''}${isCFO() || isCEO() ? `<button class="btn primary" onclick="uiAccountingAllocate()">Allocate to squad</button><button class="btn" onclick="uiAccountingAllocatePersonal()">Allocate to person</button>` : ''}${isCFO() ? '<button class="btn" onclick="uiPoolFundingRequest()">Request pool funding</button>' : ''}${isCEO() ? '<button class="btn primary" onclick="uiPoolFundingDirect()">Add external pool capital</button><button class="btn bad" onclick="uiSweepAllFunds()">Return all funds to reserve</button>' : ''}`);
   let reconciliation = null;
   if (isCEO()) { try { reconciliation = await api('POST', '/ledger/verify-chain'); } catch (_) {} }
   C().innerHTML = `
@@ -1997,12 +2006,22 @@ async function viewAccounting() {
       ${(isCEO() || isCFO()) && selected?.type === 'SQUAD_TREASURY' ? `<button class="btn sm bad" style="width:100%;margin-top:8px" onclick="uiReturnSquadFunds('${selected.squadId}','${esc(selected.balance)}')">Return unspent balance to reserve</button>` : ''}
     </div><div class="panel accounting-entries"><h3>Debit / credit activity · latest 100</h3>
       ${selected ? `<div class="muted" style="font-size:11px;margin-bottom:8px">${esc(selected.type.replace(/_/g, ' '))} · balance ${money(selected.balance)}</div><table><tr><th>Time</th><th>Reference</th><th>Description</th><th>Debit</th><th>Credit</th></tr>${entries.map((e) => `<tr><td class="mono">${dt(e.createdAt)}</td><td>${esc(e.transaction.referenceType)}</td><td>${esc(e.transaction.description || '—')}</td><td class="money">${e.direction === 'DEBIT' ? money(e.amount) : '—'}</td><td class="money">${e.direction === 'CREDIT' ? money(e.amount) : '—'}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">No ledger entries</td></tr>'}</table>` : '<div class="empty">No accounts</div>'}
-    </div></div>`;
+      </div></div>
+      ${globalView ? `<div class="panel" style="margin-top:14px"><h3>All transactions · ${globalTransactions.length} shown</h3><table><tr><th>Time</th><th>Action</th><th>Authorized by</th><th>Description</th><th>Debit total</th></tr>${globalTransactions.map((t) => `<tr><td class="mono">${dt(t.createdAt)}</td><td>${esc(t.referenceType)}</td><td>${esc(t.authorizedBy?.fullName || '—')} (${esc(t.authorizedBy?.role || '—')})</td><td>${esc(t.description || '—')}</td><td class="money">${money((t.entries || []).filter((e) => e.direction === 'DEBIT').reduce((sum, e) => sum + Number(e.amount), 0))}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">No matching transactions</td></tr>'}</table></div>` : ''}`;
 }
 
 function uiAccountingAllocate() {
   const options = S.squads.filter((s) => s.isActive !== false).map((s) => ({ value: s.id, label: s.name }));
   formModal('Allocate reserve to squad', [{ name: 'squadId', label: 'Active squad', type: 'select', required: true, options }, { name: 'amount', label: 'Amount (BDT)', type: 'number', required: true, min: 0.01, step: '0.01' }], 'Allocate', (d) => act('POST', '/ledger/allocate', { squadId: d.squadId, amount: +d.amount }, true));
+}
+
+async function uiAccountingAllocatePersonal() {
+  const users = await api('GET', '/users');
+  const options = users.filter((u) => u.isActive !== false).map((u) => ({ value: u.id, label: `${u.fullName} (${u.role})` }));
+  formModal('Allocate reserve funds to a personal wallet', [
+    { name: 'userId', label: 'Active user', type: 'select', required: true, options },
+    { name: 'amount', label: 'Amount (BDT)', type: 'number', required: true, min: 0.01, step: '0.01' },
+  ], 'Allocate to wallet', (d) => act('POST', '/ledger/allocate-personal', { userId: d.userId, amount: +d.amount }, true));
 }
 
 function uiPoolFundingRequest() {
@@ -2018,6 +2037,17 @@ function uiReturnSquadFunds(squadId, amount) {
   act('POST', `/ledger/squads/${squadId}/return-funds`, undefined, true);
 }
 
+async function uiSweepAllFunds() {
+  const accounts = await api('GET', '/ledger/accounts');
+  const sweepable = accounts.filter((a) => ['PERSONAL_WALLET', 'SQUAD_TREASURY'].includes(a.type) && Number(a.balance) > 0);
+  const total = sweepable.reduce((sum, a) => sum + Number(a.balance), 0);
+  if (!total) { toast('All personal wallets and squad treasuries are already empty'); return; }
+  if (!confirm(`This will transfer ${money(total)} from ${sweepable.length} personal/squad accounts into SYSTEM_RESERVE. Each debit and the reserve credit will be recorded in the ledger. This cannot be undone. Continue?`)) return;
+  const confirmation = prompt('Type RETURN_ALL_FUNDS_TO_RESERVE to confirm:');
+  if (confirmation !== 'RETURN_ALL_FUNDS_TO_RESERVE') { toast('Sweep cancelled; confirmation did not match', false); return; }
+  act('POST', '/ledger/reserve/sweep', { confirmation }, true);
+}
+
 async function viewFinance() {
   const sections = [];
   let payouts = [], loans = [], equity = null;
@@ -2030,7 +2060,12 @@ async function viewFinance() {
         ${payouts.length ? `<table><tr><th>Sprint</th><th>Status</th><th>Pool</th><th>Actions</th></tr>
           ${payouts.map((p) => `<tr><td>Sprint ${p.sprintNumber}</td><td>${statusBadge(p.status)}</td><td class="money">${money(p.totalPool)}</td>
             <td class="row">${isCEO() && p.status === 'PROPOSED' ? `<button class="btn good sm" onclick="act('POST','/sprint-payouts/${p.id}/ceo-approve')">CEO approve</button>` : ''}
-              ${isCFO() && p.status === 'APPROVED' ? `<button class="btn primary sm" onclick="act('POST','/sprint-payouts/${p.id}/execute',null,true)">Execute</button>` : ''}</td></tr>`).join('')}
+              ${isCFO() && p.status === 'APPROVED' ? `<button class="btn primary sm" onclick="act('POST','/sprint-payouts/${p.id}/execute',null,true)">Execute</button>` : ''}</td></tr>
+            <tr><td colspan="4"><details class="payout-details"><summary>View CFO rankings and payout details</summary>
+              <table><tr><th>Rank</th><th>Squad</th><th>Gross pool</th><th>Tax</th><th>Net to squad</th><th>PM bonus</th></tr>
+                ${(p.items || []).slice().sort((a, b) => a.rank - b.rank).map((item) => `<tr><td>${item.rank}</td><td><b>${esc(item.squad?.name || item.squadId)}</b></td><td class="money">${money(item.grossAmount)}</td><td>${money(item.taxAmount)}</td><td>${money(item.netAmount)}</td><td>${money(item.pmBonusAmount || 0)}</td></tr>`).join('')}
+              </table>
+            </details></td></tr>`).join('')}
         </table>` : '<div class="empty">No payouts yet</div>'}</div>`);
   }
   if (isCFO()) {

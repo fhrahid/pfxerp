@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
 import { createHmac } from 'crypto';
-import { Account, AccountType, LedgerDirection, LedgerTransaction, Prisma, TransactionType } from '@prisma/client';
+import { Account, AccountType, LedgerDirection, LedgerTransaction, Prisma, TransactionType, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppException } from '../../common/exceptions/app.exception';
 import { EventsGateway } from '../../events/events.gateway';
@@ -223,6 +223,55 @@ export class LedgerService {
     });
   }
 
+  /** Atomic CEO sweep: all positive user wallets and squad treasuries -> reserve. */
+  async sweepAllUserAndSquadFunds(ceoId: string, idempotencyKey: string) {
+    const result = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(730023, 1) IS NULL AS locked`;
+      const existing = await tx.ledgerTransaction.findUnique({
+        where: { idempotencyKey }, include: { entries: true },
+      });
+      if (existing) {
+        if (existing.referenceType !== 'RESERVE_SWEEP' || existing.authorizedById !== ceoId) {
+          throw new AppException('CONFLICT', 'Idempotency key was used for another transaction');
+        }
+        return {
+          transaction: existing,
+          accountIds: [...new Set(existing.entries.map((entry) => entry.accountId))],
+          amount: existing.entries.filter((entry) => entry.direction === 'DEBIT').reduce((sum, e) => sum + Number(e.amount), 0),
+          accountsSwept: existing.entries.filter((entry) => entry.direction === 'DEBIT').length,
+          replayed: true,
+        };
+      }
+
+      const reserve = await this.systemReserve(tx);
+      const accounts = await tx.$queryRaw<Account[]>(Prisma.sql`
+        SELECT id, balance, "isFrozen" FROM "Account"
+        WHERE type::text IN ('PERSONAL_WALLET', 'SQUAD_TREASURY') AND balance > 0
+        ORDER BY id ASC FOR UPDATE
+      `);
+      for (const account of accounts) {
+        if (account.isFrozen) throw new AppException('LEDGER_ACCOUNT_FROZEN', `Account ${account.id} is frozen; sweep aborted without transfers`);
+      }
+      const debits = accounts.map((account) => ({ accountId: account.id, direction: 'DEBIT' as const, amount: Number(account.balance) }));
+      const total = Math.round(debits.reduce((sum, entry) => sum + entry.amount, 0) * 100) / 100;
+      if (!total) return { transaction: null, accountIds: [], amount: 0, accountsSwept: 0, replayed: false };
+      const transaction = await this.postTransaction({
+        entries: [...debits, { accountId: reserve.id, direction: 'CREDIT', amount: total }],
+        referenceType: 'RESERVE_SWEEP', description: 'CEO-authorized return of all positive personal and squad balances to system reserve',
+        idempotencyKey, authorizedById: ceoId,
+      }, tx);
+      await tx.executiveAuditLog.create({
+        data: {
+          executiveId: ceoId, executiveRole: UserRole.CEO, actionType: 'GLOBAL_RESERVE_SWEEP', riskSeverity: 'CRITICAL',
+          payloadSnapshot: { transactionId: transaction.id, amount: total, accountsSwept: accounts.length },
+        },
+      });
+      return { transaction, accountIds: [...accounts.map((a) => a.id), reserve.id], amount: total, accountsSwept: accounts.length, replayed: false };
+    }, { timeout: 30000 });
+    if (result.accountIds.length) await this.publishBalanceUpdates(result.accountIds);
+    return { transactionId: result.transaction?.id || null, amount: result.amount, accountsSwept: result.accountsSwept, replayed: result.replayed };
+  }
+
   // --------------------------------------------------------------
   // Account resolution helpers
   // --------------------------------------------------------------
@@ -310,8 +359,15 @@ export class LedgerService {
   }
 
   /** Public transaction feed for dashboards. */
-  async recentTransactions(limit = 25) {
+  async recentTransactions(limit = 25, filters: { referenceType?: TransactionType; userId?: string } = {}) {
     const txs = await this.prisma.ledgerTransaction.findMany({
+      where: {
+        ...(filters.referenceType ? { referenceType: filters.referenceType } : {}),
+        ...(filters.userId ? { OR: [
+          { authorizedById: filters.userId },
+          { entries: { some: { account: { ownerId: filters.userId } } } },
+        ] } : {}),
+      },
       orderBy: { createdAt: 'desc' },
       take: limit,
       include: {
