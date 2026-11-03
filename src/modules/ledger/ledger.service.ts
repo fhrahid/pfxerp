@@ -371,7 +371,10 @@ export class LedgerService {
       orderBy: { createdAt: 'desc' },
       take: limit,
       include: {
-        entries: { include: { account: { select: { id: true, type: true, ownerId: true, squadId: true } } } },
+        entries: { include: { account: { select: {
+          id: true, type: true, ownerId: true, squadId: true,
+          user: { select: { fullName: true } }, squad: { select: { name: true } },
+        } } } },
         authorizedBy: { select: { id: true, fullName: true, role: true } },
       },
     });
