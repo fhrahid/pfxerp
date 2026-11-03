@@ -366,6 +366,8 @@ const TABS = [
   { id: 'invitations', label: 'Invitations', show: () => isExec() },
   { id: 'payroll', label: 'Payroll', show: () => isPM() || isCPO() || isCEO() },
   { id: 'finance', label: 'Finance', show: () => isExec() || isPM() },
+  { id: 'accounting', label: 'Accounting', show: () => true },
+  { id: 'profile', label: 'My Profile', show: () => true },
   { id: 'governance', label: 'Governance', show: () => isExec() },
   { id: 'marketplace', label: 'Marketplace', show: () => true },
   { id: 'consultancy', label: 'Consultancy', show: () => true },
@@ -386,6 +388,8 @@ const TAB_TITLES = {
   invitations: ['Developer Invitations', 'Send 72-hour developer invitation links via Resend and manage token validity'],
   payroll: ['Weekly Lab Payroll', 'PM proposes ≤ ৳10,000 · CHRO audits & disburses'],
   finance: ['Finance', 'Sprint pool ৳150,000 · 5% tax · loans · equity'],
+  accounting: ['Accounting', 'Double-entry cashflow · role-scoped accounts'],
+  profile: ['My Profile', 'Your wallet, work history, activity and password'],
   governance: ['Governance', '2-of-3 board vote → CEO sign-off'],
   marketplace: ['Marketplace', 'Boilerplate store — certified authors, squad licenses'],
   consultancy: ['Consultancy', '15-minute architecture office hours — ৳4,000, 50/50 split'],
@@ -415,6 +419,21 @@ function toggleSidebar(open) {
 }
 window.toggleSidebar = toggleSidebar;
 
+function toggleTheme() {
+  const white = !document.body.classList.contains('white-mode');
+  document.body.classList.toggle('white-mode', white);
+  try { localStorage.setItem('pf_theme', white ? 'white' : 'dark'); } catch (_) {}
+  document.querySelectorAll('.theme-toggle, .white-mode-toggle').forEach((button) => {
+    button.textContent = white ? '☀ White mode' : '☾ Dark mode';
+  });
+}
+
+function restoreTheme() {
+  let white = true;
+  try { white = localStorage.getItem('pf_theme') !== 'dark'; } catch (_) {}
+  document.body.classList.toggle('white-mode', white);
+}
+
 function renderShell() {
   const u = S.user;
   const tabs = TABS.filter((t) => t.show());
@@ -428,12 +447,15 @@ function renderShell() {
       <div class="nav-list">
         ${tabs.map((t) => `<a class="nav-btn ${S.tab === t.id ? 'active' : ''}" href="#" onclick="event.preventDefault();setTab('${t.id}')">${t.label}</a>`).join('')}
       </div>
-      <div class="spacer"></div>
       <div class="userbox">
         <div class="name">${esc(u.fullName)}</div>
         <div class="role">${esc(u.role)}</div>
         <div class="wallet">${money(u.walletBalance)}</div>
-        <button class="btn sm ghost" style="margin-top:8px;width:100%;justify-content:center" onclick="doLogout()">Log out</button>
+        <div class="userbox-actions">
+          <button class="btn sm ghost" onclick="setTab('profile')" title="View my profile">Profile</button>
+          <button class="btn sm ghost theme-toggle" onclick="toggleTheme()" title="Switch white/dark mode">☀ White mode</button>
+          <button class="btn sm ghost" onclick="doLogout()">Log out</button>
+        </div>
       </div>
     </nav>
     <main class="main">
@@ -445,6 +467,7 @@ function renderShell() {
           <div><h2>${TAB_TITLES[S.tab]?.[0] || ''}</h2><div class="sub">${TAB_TITLES[S.tab]?.[1] || ''}</div></div>
         </div>
         <div class="row topbar-right">
+          <button class="btn sm ghost white-mode-toggle" onclick="toggleTheme()">${document.body.classList.contains('white-mode') ? '☀ White mode' : '☾ Dark mode'}</button>
           <span id="sprint-chip" class="sprint-chip ${isExec() ? 'editable' : ''}" ${isExec() ? "title='Click to change the active sprint'" : ''} onclick="${isExec() ? "uiSetSprint()" : ''}">Sprint ${S.currentSprint ?? '—'}</span>
           <div id="tab-actions" class="row"></div>
         </div>
@@ -468,7 +491,7 @@ async function render() {
   const views = {
     overview: viewOverview, kanban: viewKanban, squads: viewSquads, roster: viewRoster,
     invitations: viewInvitations,
-    payroll: viewPayroll, finance: viewFinance, governance: viewGovernance,
+    payroll: viewPayroll, finance: viewFinance, accounting: viewAccounting, profile: viewProfile, governance: viewGovernance,
     marketplace: viewMarketplace, consultancy: viewConsultancy, quality: viewQuality,
     bounty: viewBounty, clients: viewClients, notices: viewNotices, chaos: viewChaos,
     leaderboard: viewLeaderboard, audit: viewAudit, settings: viewSettings,
@@ -1213,7 +1236,23 @@ function uiTransferMember() {
 }
 
 /* ------------------------------ People (CRUD) ------------------------------ */
-async function uiUserProfile(userId) {
+async function viewProfile() {
+  await uiUserProfile(S.user.id, true);
+}
+
+function uiChangePassword() {
+  formModal('Change your password', [
+    { name: 'currentPassword', label: 'Current password', type: 'password', required: true },
+    { name: 'newPassword', label: 'New password (minimum 12 characters)', type: 'password', required: true },
+  ], 'Change password', async (d) => {
+    if (!d.newPassword || d.newPassword.length < 12) throw new Error('New password must be at least 12 characters');
+    await api('POST', '/auth/change-password', d);
+    toast('Password changed. Please sign in again.');
+    setTimeout(() => doLogout(), 700);
+  });
+}
+
+async function uiUserProfile(userId, asPage = false) {
   try {
     const p = await api('GET', '/users/' + userId + '/profile');
     const stats = p.stats || {};
@@ -1228,6 +1267,14 @@ async function uiUserProfile(userId) {
     const pmhiSnapshots = p.pmhiSnapshots || [];
     const auditLogs = p.executiveAuditLogs || [];
     const execDetails = p.executiveDetails || {};
+    const heatmap = p.activityHeatmap || [];
+    const activityByDate = new Map(heatmap.map((d) => [d.date, Number(d.count) || 0]));
+    const heatmapCells = Array.from({ length: 365 }, (_, i) => {
+      const day = new Date();
+      day.setDate(day.getDate() - (364 - i));
+      const date = day.toISOString().slice(0, 10);
+      return { date, count: activityByDate.get(date) || 0 };
+    });
 
     let execOperationsHtml = '';
     if (isExecUser) {
@@ -1356,6 +1403,7 @@ async function uiUserProfile(userId) {
     }
 
     const content = `
+      ${asPage ? `<div class="profile-actions"><button class="btn primary" onclick="uiChangePassword()">Change password</button></div>` : ''}
       <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:14px;">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;">
           <div>
@@ -1377,6 +1425,14 @@ async function uiUserProfile(userId) {
             <div style="font-size:22px;font-weight:800;color:var(--accent2);">${money(p.walletBalance || 0)}</div>
           </div>
         </div>
+      </div>
+
+      <div class="panel" style="margin-bottom:16px;">
+        <h4 style="margin:0 0 10px;">Activity · last 12 months</h4>
+        <div class="activity-heatmap" role="img" aria-label="Task activity heatmap for the last year">
+          ${heatmapCells.map((day) => `<span title="${esc(day.date)}: ${day.count} task updates" class="heat-cell heat-${Math.min(4, day.count)}"></span>`).join('')}
+        </div>
+        <div class="muted" style="font-size:11px;margin-top:8px;">Daily task status changes from the audit trail.</div>
       </div>
 
       <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:10px;margin-bottom:16px;">
@@ -1489,7 +1545,8 @@ async function uiUserProfile(userId) {
       ${execOperationsHtml}
     `;
 
-    modal('Member Profile: ' + esc(p.fullName), content);
+    if (asPage) C().innerHTML = content;
+    else modal('Member Profile: ' + esc(p.fullName), content);
   } catch (e) {
     toast('Failed to load profile: ' + e.message, false);
   }
@@ -1921,6 +1978,46 @@ async function uiPayrollSubmit() {
 }
 
 /* ------------------------------ Finance ------------------------------ */
+/* ------------------------------ Accounting (role-scoped immutable ledger) ------------------------------ */
+async function viewAccounting() {
+  const accounts = await api('GET', '/ledger/accounts');
+  const selected = accounts.find((a) => a.id === S.accountId) || accounts[0];
+  if (selected) S.accountId = selected.id;
+  const entries = selected ? await api('GET', `/ledger/accounts/${selected.id}/entries`) : [];
+  let requests = [];
+  if (isCEO() || isCFO()) { try { requests = await api('GET', '/ledger/pool-funding/requests'); } catch (_) {} }
+  tabActions(`${isCFO() ? `<button class="btn primary" onclick="uiAccountingAllocate()">Allocate to squad</button><button class="btn" onclick="uiPoolFundingRequest()">Request pool funding</button>` : ''}${isCEO() ? '<button class="btn primary" onclick="uiPoolFundingDirect()">Add external pool capital</button>' : ''}`);
+  let reconciliation = null;
+  if (isCEO()) { try { reconciliation = await api('POST', '/ledger/verify-chain'); } catch (_) {} }
+  C().innerHTML = `
+    ${isCEO() && reconciliation?.totalBalanceDiscrepancies ? `<div class="panel" style="border-color:var(--warn);margin-bottom:12px"><b style="color:var(--warn)">Opening-balance reconciliation needed</b><div class="muted" style="margin-top:5px">${reconciliation.totalBalanceDiscrepancies} accounts differ from available ledger history. Hash chain: ${esc(reconciliation.chainStatus)}. No automatic adjustment was made; verify opening amounts against bank records.</div>${(reconciliation.balanceDiscrepancies || []).slice(0, 5).map((d) => `<div class="row" style="justify-content:space-between;border-top:1px solid var(--border);padding-top:4px;font-size:11px"><span>${esc(d.type)} · ${esc(d.squadId || d.ownerId || d.accountId)}</span><span>book ${money(d.currentBalance)} · journal ${money(d.ledgerBalance)} · difference ${money(d.difference)}</span></div>`).join('')}</div>` : ''}
+    ${requests.length ? `<div class="panel" style="margin-bottom:12px"><h3>CFO pool funding requests</h3>${requests.map((r) => `<div class="list-item"><div class="top"><span><b>${money(r.amount)}</b> · ${esc(r.memo)}<div class="muted" style="font-size:11px">Requested by ${esc(r.requestedBy?.fullName)} · ${dt(r.createdAt)}</div></span><span>${statusBadge(r.status)} ${isCEO() && r.status === 'PENDING' ? `<button class="btn sm good" onclick="act('POST','/ledger/pool-funding/requests/${r.id}/approve')">Approve & fund</button>` : ''}</span></div></div>`).join('')}</div>` : ''}
+    <div class="accounting-grid"><div class="panel"><h3>Accounts in your scope</h3>
+      ${accounts.map((a) => `<button class="account-tile ${a.id === selected?.id ? 'selected' : ''}" onclick="S.accountId='${a.id}';viewAccounting()"><span>${esc(a.type.replace(/_/g, ' '))}</span><b>${money(a.balance)}</b>${a.isFrozen ? badge('FROZEN', 'b-red') : ''}</button>`).join('') || '<div class="empty">No accounts in your scope</div>'}
+      ${(isCEO() || isCFO()) && selected?.type === 'SQUAD_TREASURY' ? `<button class="btn sm bad" style="width:100%;margin-top:8px" onclick="uiReturnSquadFunds('${selected.squadId}','${esc(selected.balance)}')">Return unspent balance to reserve</button>` : ''}
+    </div><div class="panel accounting-entries"><h3>Debit / credit activity · latest 100</h3>
+      ${selected ? `<div class="muted" style="font-size:11px;margin-bottom:8px">${esc(selected.type.replace(/_/g, ' '))} · balance ${money(selected.balance)}</div><table><tr><th>Time</th><th>Reference</th><th>Description</th><th>Debit</th><th>Credit</th></tr>${entries.map((e) => `<tr><td class="mono">${dt(e.createdAt)}</td><td>${esc(e.transaction.referenceType)}</td><td>${esc(e.transaction.description || '—')}</td><td class="money">${e.direction === 'DEBIT' ? money(e.amount) : '—'}</td><td class="money">${e.direction === 'CREDIT' ? money(e.amount) : '—'}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">No ledger entries</td></tr>'}</table>` : '<div class="empty">No accounts</div>'}
+    </div></div>`;
+}
+
+function uiAccountingAllocate() {
+  const options = S.squads.filter((s) => s.isActive !== false).map((s) => ({ value: s.id, label: s.name }));
+  formModal('Allocate reserve to squad', [{ name: 'squadId', label: 'Active squad', type: 'select', required: true, options }, { name: 'amount', label: 'Amount (BDT)', type: 'number', required: true, min: 0.01, step: '0.01' }], 'Allocate', (d) => act('POST', '/ledger/allocate', { squadId: d.squadId, amount: +d.amount }, true));
+}
+
+function uiPoolFundingRequest() {
+  formModal('Request external pool funding', [{ name: 'amount', label: 'Amount (BDT)', type: 'number', required: true, min: 0.01, step: '0.01' }, { name: 'memo', label: 'Source / reason (CEO approval required)', type: 'textarea', required: true }], 'Send to CEO', (d) => act('POST', '/ledger/pool-funding/requests', { amount: +d.amount, memo: d.memo }));
+}
+
+function uiPoolFundingDirect() {
+  formModal('Add external capital to system reserve', [{ name: 'amount', label: 'Amount (BDT)', type: 'number', required: true, min: 0.01, step: '0.01' }, { name: 'memo', label: 'Verified source / bank reference', type: 'textarea', required: true }], 'Record capital injection', (d) => act('POST', '/ledger/pool-funding/direct', { amount: +d.amount, memo: d.memo }, true));
+}
+
+function uiReturnSquadFunds(squadId, amount) {
+  if (!confirm(`Return ${money(amount)} from this squad treasury to SYSTEM_RESERVE? This is recorded as a ledger transfer.`)) return;
+  act('POST', `/ledger/squads/${squadId}/return-funds`, undefined, true);
+}
+
 async function viewFinance() {
   const sections = [];
   let payouts = [], loans = [], equity = null;
@@ -2466,6 +2563,7 @@ async function boot() {
 }
 
 async function init() {
+  restoreTheme();
   const hash = (typeof window !== 'undefined' && window.location?.hash) || '';
   if (hash.startsWith('#accept-invite?')) {
     const params = new URLSearchParams(hash.slice('#accept-invite?'.length));
