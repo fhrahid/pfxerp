@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Headers, Param, Patch, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Headers, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { IsIn, IsInt, IsOptional, IsNumber, IsString, IsUUID, Max, Min, MinLength } from 'class-validator';
 import { UserRole } from '@prisma/client';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
@@ -85,8 +85,8 @@ export class SquadsController {
   constructor(private readonly squads: SquadsService) {}
 
   @Get()
-  list(@CurrentUser() user: AuthUser) {
-    return this.squads.listSquads(user);
+  list(@CurrentUser() user: AuthUser, @Query('includeInactive') includeInactive?: string) {
+    return this.squads.listSquads(user, includeInactive === 'true' || includeInactive === '1');
   }
 
   @Get(':id')
@@ -106,6 +106,13 @@ export class SquadsController {
   @Roles(UserRole.CPO, UserRole.CEO)
   update(@Param('id') id: string, @Body() dto: UpdateSquadDto) {
     return this.squads.updateSquad(id, dto);
+  }
+
+  /** CEO only: permanently delete a squad and all of its data. */
+  @Delete(':id')
+  @Roles(UserRole.CEO)
+  remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.squads.deleteSquad(user, id);
   }
 
   /** List connected repositories (squad members + C-level). */

@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Github, Pencil, Plus, RefreshCw, Trash2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { api, ROLES } from "@/lib/api";
-import { useAction, useMe, useSquads } from "@/components/shell";
+import { useAction, useMe } from "@/components/shell";
 import { FormDialog } from "@/components/form-dialog";
 import { Button } from "@/components/ui/button";
 import { Badge, statusVariant } from "@/components/ui/badge";
@@ -18,10 +18,32 @@ import { GitSummary } from "./git-summary";
 
 export default function SquadsPage() {
   const me = useMe();
-  const squads = useSquads();
-  const action = useAction();
+  const qc = useQueryClient();
   const role = me.data?.role || "";
   const manage = ROLES.canManage(role);
+  const isCeo = ROLES.isCEO(role);
+  const [showInactive, setShowInactive] = React.useState(false);
+
+  const squads = useQuery({
+    queryKey: ["squads", showInactive],
+    queryFn: () => api<any[]>("GET", `/squads${showInactive ? "?includeInactive=true" : ""}`),
+  });
+
+  const deleteSquad = async (s: any) => {
+    if (
+      !window.confirm(
+        `Permanently delete "${s.name}"?\n\nThis removes its treasury, ledger history, tasks, members and repositories. This cannot be undone.`,
+      )
+    )
+      return;
+    try {
+      await api("DELETE", `/squads/${s.id}`);
+      toast.success(`Squad "${s.name}" deleted`);
+      qc.invalidateQueries({ queryKey: ["squads"] });
+    } catch (err) {
+      toast.error((err as Error).message || "Delete failed");
+    }
+  };
 
   if (squads.isLoading) return <Skeleton className="h-96 w-full rounded-xl" />;
 
@@ -55,6 +77,18 @@ export default function SquadsPage() {
         </div>
       ) : null}
 
+      <div className="flex items-center justify-between gap-2">
+        <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={showInactive}
+            onChange={(e) => setShowInactive(e.target.checked)}
+            className="h-4 w-4 rounded border-gray-300"
+          />
+          Show deactivated squads
+        </label>
+      </div>
+
       <Card>
         <CardContent className="p-0">
           <Table>
@@ -70,8 +104,13 @@ export default function SquadsPage() {
             </TableHeader>
             <TableBody>
               {(squads.data || []).map((s: any) => (
-                <TableRow key={s.id}>
-                  <TableCell className="font-semibold">{s.name}</TableCell>
+                <TableRow key={s.id} className={s.isActive === false ? "opacity-60" : undefined}>
+                  <TableCell className="font-semibold">
+                    {s.name}
+                    {s.isActive === false ? (
+                      <Badge variant="muted" className="ml-2">inactive</Badge>
+                    ) : null}
+                  </TableCell>
                   <TableCell>{s.memberCount}</TableCell>
                   <TableCell className="font-semibold tabular-nums text-emerald-700">{taka(s.balance)}</TableCell>
                   <TableCell className="tabular-nums">{taka(s.valuation)}</TableCell>
@@ -92,6 +131,11 @@ export default function SquadsPage() {
                           submitLabel="Save"
                           onSubmit={(d) => api("PATCH", `/squads/${s.id}`, { name: d.name, description: d.description, isActive: !!d.isActive })}
                         />
+                      ) : null}
+                      {isCeo ? (
+                        <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" title="Delete squad (CEO only)" onClick={() => deleteSquad(s)}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       ) : null}
                     </div>
                   </TableCell>

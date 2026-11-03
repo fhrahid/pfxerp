@@ -241,6 +241,7 @@ model User {
   pmVerifiedTasks         Task[]                     @relation("TaskPmVerifier")
   ctoVerifiedTasks        Task[]                     @relation("TaskCtoVerifier")
   taskAuditEvents         TaskAuditEvent[]
+  taskAssignees           TaskAssignee[]
   payrollLineItems        PayrollLineItem[]
   submittedPayrolls       PayrollProposal[]          @relation("PayrollSubmitter")
   approvedPayrolls        PayrollProposal[]          @relation("PayrollApprover")
@@ -433,6 +434,7 @@ model Task {
 
   auditEvents           TaskAuditEvent[]
   codeCitations         CodeAuditCitation[]
+  assignees             TaskAssignee[]
 
   @@index([squadId])
   @@index([assignedToId])
@@ -453,6 +455,21 @@ model TaskAuditEvent {
   changedBy   User       @relation(fields: [changedById], references: [id], onDelete: Cascade)
 
   @@index([taskId])
+}
+
+// v1.2: multiple collaborators per task. Task.assignedToId stays as the primary.
+model TaskAssignee {
+  id      String   @id @default(uuid())
+  taskId  String
+  userId  String
+  addedAt DateTime @default(now())
+
+  task    Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, userId])
+  @@index([taskId])
+  @@index([userId])
 }
 
 model PayrollProposal {

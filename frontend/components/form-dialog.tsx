@@ -28,7 +28,18 @@ import { cn } from "@/lib/utils";
 export interface FormField {
   name: string;
   label: string;
-  type?: "text" | "email" | "password" | "number" | "textarea" | "select" | "datetime" | "datetime-local" | "date" | "checkbox";
+  type?:
+    | "text"
+    | "email"
+    | "password"
+    | "number"
+    | "textarea"
+    | "select"
+    | "checkbox"
+    | "checkboxes"
+    | "datetime"
+    | "datetime-local"
+    | "date";
   options?: { value: string; label: string }[];
   value?: string | number | boolean;
   required?: boolean;
@@ -72,6 +83,7 @@ export function FormDialog({ trigger, open, onOpenChange, title, description, fi
     const data: Record<string, any> = {};
     for (const f of fields) {
       if (f.type === "checkbox") data[f.name] = form.get(f.name) === "on";
+      else if (f.type === "checkboxes") data[f.name] = form.getAll(f.name);
       else data[f.name] = form.get(f.name);
     }
     setBusy(true);
@@ -103,6 +115,22 @@ export function FormDialog({ trigger, open, onOpenChange, title, description, fi
                   <Checkbox id={`fd-${f.name}`} name={f.name} defaultChecked={Boolean(f.value)} />
                   <Label htmlFor={`fd-${f.name}`}>{f.label}</Label>
                 </>
+              ) : f.type === "checkboxes" ? (
+                <div className="grid gap-1.5">
+                  <Label>{f.label}</Label>
+                  {(f.options || []).map((o) => (
+                    <label key={o.value} className="flex items-center gap-2 text-sm font-normal cursor-pointer">
+                      <input
+                        type="checkbox"
+                        name={f.name}
+                        value={o.value}
+                        defaultChecked={Array.isArray(f.value) ? (f.value as string[]).includes(o.value) : undefined}
+                        className="h-4 w-4 rounded border-gray-300"
+                      />
+                      {o.label}
+                    </label>
+                  ))}
+                </div>
               ) : (
                 <>
                   <Label htmlFor={`fd-${f.name}`}>{f.label}</Label>

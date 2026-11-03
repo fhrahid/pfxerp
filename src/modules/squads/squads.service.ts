@@ -18,20 +18,22 @@ export class SquadsService {
     private readonly settings: SettingsService,
   ) {}
 
-  async listSquads(user: { id: string; role: string; squadIds: string[] }) {
+  async listSquads(user: { id: string; role: string; squadIds: string[] }, includeInactive = false) {
     const isExec = isExecRole(user.role);
     const squads = await this.prisma.squad.findMany({
       where: {
-        isActive: true,
+        // Deactivated squads stay visible (flagged) unless explicitly filtered.
+        ...(includeInactive ? {} : { isActive: true }),
         ...(isExec ? {} : { id: { in: user.squadIds.length ? user.squadIds : ['none'] } }),
       },
       include: { account: true, _count: { select: { memberships: { where: { leftAt: null } }, tasks: true } } },
-      orderBy: { name: 'asc' },
+      orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
     });
     return squads.map((s) => ({
       id: s.id,
       name: s.name,
       description: s.description,
+      isActive: s.isActive,
       healthStatus: s.healthStatus,
       valuation: Number(s.valuation),
       balance: s.account ? Number(s.account.balance) : 0,
@@ -125,6 +127,55 @@ export class SquadsService {
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
       },
     });
+  }
+
+  /**
+   * CEO-only: permanently delete a squad and everything it owns — treasury,
+   * ledger entries, tasks, memberships, payroll proposals and repos.
+   * Destructive by design; the action itself is recorded in the executive audit.
+   */
+  async deleteSquad(caller: { id: string; role: string }, squadId: string) {
+    if (caller.role !== UserRole.CEO) {
+      throw new AppException('AUTHZ_FORBIDDEN', 'Only the Chief Executive Officer (CEO) has authority to delete squads.');
+    }
+    const squad = await this.prisma.squad.findUnique({
+      where: { id: squadId },
+      include: { account: true, _count: { select: { tasks: true, memberships: true } } },
+    });
+    if (!squad) throw new NotFoundException('Squad not found');
+
+    await this.prisma.$transaction(async (tx) => {
+      // 1. record the destructive action BEFORE removing its subject
+      await tx.executiveAuditLog.create({
+        data: {
+          executiveId: caller.id,
+          executiveRole: UserRole.CEO,
+          actionType: 'SQUAD_DELETED',
+          riskSeverity: 'CRITICAL',
+          payloadSnapshot: {
+            squadId,
+            squadName: squad.name,
+            balance: squad.account ? Number(squad.account.balance) : 0,
+            taskCount: squad._count.tasks,
+            memberCount: squad._count.memberships,
+          },
+        },
+      });
+
+      // 2. ledger: entries first (Restrict on Account), then orphaned transactions
+      if (squad.account) {
+        await tx.ledgerEntry.deleteMany({ where: { accountId: squad.account.id } });
+      }
+      await tx.ledgerTransaction.deleteMany({
+        where: { entries: { none: {} } },
+      });
+
+      // 3. Prisma cascades the rest: account, memberships, tasks (+audit),
+      //    payroll proposals, sprint participants, repositories, etc.
+      await tx.squad.delete({ where: { id: squadId } });
+    });
+
+    return { success: true, deleted: squadId, name: squad.name };
   }
 
   // ------------------------------------------------------------------

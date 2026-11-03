@@ -1,4 +1,4 @@
-import { Body, Controller, ForbiddenException, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post } from '@nestjs/common';
 import { IsBoolean, IsEmail, IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { UserRole } from '@prisma/client';
@@ -128,5 +128,12 @@ export class UsersController {
   @Roles(UserRole.CPO, UserRole.CEO)
   update(@Param('id') id: string, @Body() dto: UpdateUserDto, @CurrentUser() caller: AuthUser) {
     return this.usersService.updateUser(id, dto, caller);
+  }
+
+  /** CEO only: permanently delete an account and its owned records. */
+  @Delete(':id')
+  @Roles(UserRole.CEO)
+  remove(@Param('id') id: string, @CurrentUser() caller: AuthUser) {
+    return this.usersService.deleteUser(caller, id);
   }
 }

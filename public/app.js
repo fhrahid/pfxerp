@@ -615,7 +615,7 @@ async function viewKanban() {
           </div>
           ${t.dueDate ? `<div class="muted" style="font-size:11px">Due: ${dt(t.dueDate)}</div>` : ''}
           <div class="m" style="font-size:11.5px;color:var(--muted);justify-content:space-between;">
-            <span>${esc(t.assignedTo?.fullName || 'unassigned')}</span>
+            <span>${esc(((t.assigneeNames || []).length ? t.assigneeNames.map((a) => a.fullName) : [t.assignedTo?.fullName]).filter(Boolean).join(', ') || 'unassigned')}</span>
             ${t.squad ? `<span style="opacity:0.75;">${esc(t.squad.name)}</span>` : ''}
           </div>
           ${next ? `<button class="btn primary sm" style="margin-top:6px;width:100%" onclick="event.stopPropagation();kMove('${t.id}','${next.to}')">${next.label} →</button>` : ''}
@@ -669,7 +669,7 @@ function kPrimaryMove(t) {
 
 function kCanMove(t, to) {
   if (t.status === to) return { ok: false, reason: 'Already there' };
-  const isAssignee = t.assignedToId === S.user.id;
+  const isAssignee = t.assignedToId === S.user.id || (t.assigneeIds || []).includes(S.user.id);
   const isPmOrCeo = isPM() || isCEO();
   const isCtoOrCeo = isCTO() || isCEO();
   const rules = {
@@ -702,9 +702,27 @@ async function kMove(id, to) {
       members = (detail.members || []).filter((m) => m.role === 'DEVELOPER' || m.role === 'PM');
     } catch (_) {}
     if (!members.length) { toast('No squad members available to assign', false); return; }
-    formModal(`Assign "${t.title}"`, [
-      { name: 'assignedToId', label: 'Assignee', type: 'select', required: true, options: members.map((m) => ({ value: m.userId, label: `${m.fullName} (${m.role})` })) },
-    ], 'Assign — moves to TODO', (d) => act('PATCH', `/tasks/${id}`, { assignedToId: d.assignedToId }));
+    const current = (t.assigneeIds && t.assigneeIds.length) ? t.assigneeIds : (t.assignedToId ? [t.assignedToId] : []);
+    openModal(`Assign "${t.title}"`, `
+      <form id="kAssignForm">
+        <div class="field">
+          <label>Assignees (multiple allowed)</label>
+          ${members.map((m) => `
+          <label class="row" style="gap:8px;font-weight:400;cursor:pointer;padding:2px 0">
+            <input type="checkbox" class="kAssignee" value="${m.userId}" ${current.includes(m.userId) ? 'checked' : ''}>
+            ${esc(m.fullName)} <span class="muted">(${m.role})</span>
+          </label>`).join('')}
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn ghost" onclick="closeModal()">Cancel</button>
+          <button type="submit" class="btn primary">Assign — moves to TODO</button>
+        </div>
+      </form>`);
+    document.getElementById('kAssignForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const ids = [...document.querySelectorAll('.kAssignee:checked')].map((el) => el.value);
+      await act('PATCH', `/tasks/${id}`, { assigneeIds: ids });
+    };
   }
 }
 
@@ -725,7 +743,8 @@ async function uiTaskCreate(squadId) {
   let devOpts = [];
   try {
     const squadDetail = await api('GET', '/squads/' + activeSquadId);
-    devOpts = (squadDetail.members || []).filter((m) => m.role === 'DEVELOPER');
+    // PMs may assign themselves to tasks they co-own.
+    devOpts = (squadDetail.members || []).filter((m) => m.role === 'DEVELOPER' || m.role === 'PM');
   } catch (_) {}
 
   const formHtml = `
@@ -760,11 +779,14 @@ async function uiTaskCreate(squadId) {
         </div>
       </div>
       <div class="field">
-        <label>Assignee</label>
-        <select id="tcAssignee" name="assignedToId">
-          <option value="">— Unassigned (Backlog) —</option>
-          ${devOpts.map((d) => `<option value="${d.userId}">${esc(d.fullName)}</option>`).join('')}
-        </select>
+        <label>Assignees (multiple allowed — none for backlog)</label>
+        <div id="tcAssigneeBox">
+          ${devOpts.map((d) => `
+          <label class="row" style="gap:8px;font-weight:400;cursor:pointer;padding:2px 0">
+            <input type="checkbox" class="tcAssignee" value="${d.userId}">
+            ${esc(d.fullName)} <span class="muted">(${d.role})</span>
+          </label>`).join('') || '<div class="muted">No members</div>'}
+        </div>
       </div>
       <div class="field"><label>Due Date & Time (Optional)</label><input type="datetime-local" id="tcDue"></div>
       <div class="modal-actions">
@@ -785,7 +807,7 @@ async function uiTaskCreate(squadId) {
       description: document.getElementById('tcDesc')?.value || undefined,
       storyPoints: +(document.getElementById('tcPoints')?.value || 1),
       priority: document.getElementById('tcPriority')?.value || 'MEDIUM',
-      assignedToId: document.getElementById('tcAssignee')?.value || undefined,
+      assigneeIds: [...document.querySelectorAll('.tcAssignee:checked')].map((el) => el.value),
       dueDate: dueVal ? new Date(dueVal).toISOString() : undefined,
     };
     try {
@@ -800,13 +822,16 @@ async function uiTaskCreate(squadId) {
 }
 
 async function uiTaskCreateSquadChange(squadId) {
-  const sel = document.getElementById('tcAssignee');
-  if (!sel) return;
+  const box = document.getElementById('tcAssigneeBox');
+  if (!box) return;
   try {
     const squadDetail = await api('GET', '/squads/' + squadId);
-    const devOpts = (squadDetail.members || []).filter((m) => m.role === 'DEVELOPER');
-    sel.innerHTML = `<option value="">— Unassigned (Backlog) —</option>` +
-      devOpts.map((d) => `<option value="${d.userId}">${esc(d.fullName)}</option>`).join('');
+    const memberOpts = (squadDetail.members || []).filter((m) => m.role === 'DEVELOPER' || m.role === 'PM');
+    box.innerHTML = memberOpts.map((m) => `
+      <label class="row" style="gap:8px;font-weight:400;cursor:pointer;padding:2px 0">
+        <input type="checkbox" class="tcAssignee" value="${m.userId}">
+        ${esc(m.fullName)} <span class="muted">(${m.role})</span>
+      </label>`).join('') || '<div class="muted">No members</div>';
   } catch (_) {}
 }
 
@@ -816,8 +841,8 @@ async function uiTaskDetail(id) {
   const t = await api('GET', '/tasks/' + id);
   // Match the API: assignees can start their work; squad leadership may start
   // work on behalf of a squad. Do not present a button that the API rejects.
-  const canStart = t.status === 'TODO' && (t.assignedToId === S.user.id || isPM() || isCPO() || isCTO() || isCEO());
-  const canFlag = t.status === 'IN_PROGRESS' && t.assignedToId === S.user.id;
+  const canStart = t.status === 'TODO' && ((t.assigneeIds || []).includes(S.user.id) || t.assignedToId === S.user.id || isPM() || isCPO() || isCTO() || isCEO());
+  const canFlag = t.status === 'IN_PROGRESS' && ((t.assigneeIds || []).includes(S.user.id) || t.assignedToId === S.user.id);
   const canPm = t.status === 'FLAGGED_COMPLETE' && (isPM() || isCEO());
   const canCto = t.status === 'PM_VERIFIED' && (isCTO() || isCEO());
   const canClose = t.status === 'CTO_VERIFIED' && (isPM() || isCTO() || isCEO());
@@ -853,7 +878,7 @@ async function uiTaskDetail(id) {
     <div class="pillrow" style="margin-bottom:10px">${statusBadge(t.status)} ${badge(t.priority, t.priority === 'CRITICAL' ? 'b-red' : 'b-gray')} ${badge(t.storyPoints + ' pts', 'b-blue')} ${deadlineBadge}</div>
     <p class="muted">${esc(t.description || 'No description')}</p>
     <table>
-      <tr><td>Assignee</td><td>${esc(t.assignedTo?.fullName || '—')}</td></tr>
+      <tr><td>Assignees</td><td>${(t.assigneeNames || []).length ? esc(t.assigneeNames.map((a) => a.fullName).join(', ')) : esc(t.assignedTo?.fullName || '—')}</td></tr>
       <tr><td>Squad</td><td>${esc(t.squad?.name)}</td></tr>
       <tr><td>PR / Commit</td><td class="mono">${esc(t.gitPrUrl || t.gitCommitHash || '—')}</td></tr>
       <tr><td>Due date</td><td>${t.dueDate ? `${dt(t.dueDate)} — ${deadlineDesc}` : '<span class="muted">No deadline set</span>'}</td></tr>
@@ -880,8 +905,9 @@ async function uiTaskDetail(id) {
 async function uiTaskEdit(taskId) {
   const t = await api('GET', '/tasks/' + taskId);
   const squadDetail = await api('GET', '/squads/' + t.squadId);
-  const devOpts = (squadDetail.members || []).filter((m) => m.role === 'DEVELOPER');
-  
+  const memberOpts = (squadDetail.members || []).filter((m) => m.role === 'DEVELOPER' || m.role === 'PM');
+  const current = (t.assigneeIds && t.assigneeIds.length) ? t.assigneeIds : (t.assignedToId ? [t.assignedToId] : []);
+
   const dueIso = t.dueDate ? new Date(t.dueDate).toISOString().slice(0, 16) : '';
   const html = `
     <form id="taskEditForm">
@@ -909,11 +935,12 @@ async function uiTaskEdit(taskId) {
         </div>
       </div>
       <div class="field">
-        <label>Assignee</label>
-        <select id="teAssignee" name="assignedToId">
-          <option value="">— Unassigned (Backlog) —</option>
-          ${devOpts.map((d) => `<option value="${d.userId}" ${d.userId === t.assignedToId ? 'selected' : ''}>${esc(d.fullName)}</option>`).join('')}
-        </select>
+        <label>Assignees (multiple allowed — none for backlog)</label>
+        ${memberOpts.map((m) => `
+          <label class="row" style="gap:8px;font-weight:400;cursor:pointer;padding:2px 0">
+            <input type="checkbox" class="teAssignee" value="${m.userId}" ${current.includes(m.userId) ? 'checked' : ''}>
+            ${esc(m.fullName)} <span class="muted">(${m.role})</span>
+          </label>`).join('') || '<div class="muted">No members</div>'}
       </div>
       <div class="field">
         <label>Due Date & Time (Optional)</label>
@@ -929,12 +956,13 @@ async function uiTaskEdit(taskId) {
   document.getElementById('taskEditForm').onsubmit = async (e) => {
     e.preventDefault();
     const dueVal = document.getElementById('teDue')?.value;
+    const assigneeIds = [...document.querySelectorAll('.teAssignee:checked')].map((el) => el.value);
     const payload = {
       title: document.getElementById('teTitle')?.value,
       description: document.getElementById('teDesc')?.value,
       storyPoints: +(document.getElementById('tePoints')?.value || 1),
       priority: document.getElementById('tePriority')?.value,
-      assignedToId: document.getElementById('teAssignee')?.value || null,
+      assigneeIds,
       dueDate: dueVal ? new Date(dueVal).toISOString() : null,
     };
     try {
@@ -981,12 +1009,18 @@ function uiCtoReject(id) {
 
 /* ------------------------------ Squads (CRUD) ------------------------------ */
 async function viewSquads() {
+  if (S.showInactiveSquads === undefined) S.showInactiveSquads = false;
+  if (S.showInactiveSquads) {
+    try { S.squads = await api('GET', '/squads?includeInactive=true'); } catch { /* keep cached */ }
+  }
+  const visible = S.showInactiveSquads ? S.squads : S.squads.filter((s) => s.isActive !== false);
   tabActions(`
     ${canManage() ? '<button class="btn primary" onclick="uiSquadCreate()">+ New squad</button>' : ''}
-    ${canManage() ? '<button class="btn" onclick="uiTransferMember()">Transfer member</button>' : ''}`);
+    ${canManage() ? '<button class="btn" onclick="uiTransferMember()">Transfer member</button>' : ''}
+    <button class="btn ${S.showInactiveSquads ? 'primary' : 'ghost'}" onclick="S.showInactiveSquads=!S.showInactiveSquads;viewSquads()">${S.showInactiveSquads ? '✓ ' : ''}Show deactivated</button>`);
   C().innerHTML = `<div class="panel"><table>
-    <tr><th>Squad</th><th>Members</th><th>Treasury</th><th>Valuation</th><th>Health</th><th>Tasks</th>${canManage() ? '<th></th>' : ''}</tr>
-    ${S.squads.map((s) => `<tr>
+    <tr><th>Squad</th><th>Members</th><th>Treasury</th><th>Valuation</th><th>Health</th><th>Tasks</th><th></th></tr>
+    ${visible.map((s) => `<tr${s.isActive === false ? ' style="opacity:0.55"' : ''}>
       <td><b>${esc(s.name)}</b>${s.isActive === false ? ' ' + badge('inactive', 'b-red') : ''}</td>
       <td>${s.memberCount}</td><td class="money">${money(s.balance)}</td>
       <td>${money(s.valuation)}</td><td class="health-${s.healthStatus}">${statusBadge(s.healthStatus)}</td><td>${s.taskCount}</td>
@@ -994,8 +1028,20 @@ async function viewSquads() {
         <button class="btn sm" onclick="uiSquadDetail('${s.id}')">Open</button>
         <button class="btn sm" onclick="uiSquadGit('${s.id}')">Git</button>
         ${canManage() ? `<button class="btn sm ghost" onclick="uiSquadEdit('${s.id}','${esc(s.name)}','${esc(s.description || '')}',${s.isActive !== false})">Edit</button>` : ''}
-      </td></tr>`).join('')}
+        ${isCEO() ? `<button class="btn sm bad" title="Delete squad (CEO only)" onclick="uiSquadDelete('${s.id}','${esc(s.name)}')">Delete</button>` : ''}
+      </td></tr>`).join('') || '<tr><td colspan="7" class="muted" style="padding:10px">No squads</td></tr>'}
   </table></div>`;
+}
+
+function uiSquadDelete(id, name) {
+  if (!confirm(`Permanently delete "${name}"?\n\nIts treasury, ledger history, tasks, members and repositories will be removed. This cannot be undone.`)) return;
+  api('DELETE', `/squads/${id}`)
+    .then(async () => {
+      toast(`Squad "${name}" deleted`);
+      S.squads = await api('GET', '/squads' + (S.showInactiveSquads ? '?includeInactive=true' : ''));
+      render();
+    })
+    .catch((e) => toast(e.message, false));
 }
 
 async function uiSquadGit(squadId) {
@@ -1456,6 +1502,7 @@ async function viewRoster() {
         <button class="btn sm" onclick="uiUserProfile('${u.id}')">Profile</button>
         <button class="btn sm" onclick="uiCopy('${u.id}')">ID</button>
         ${canManage() && (isCEO() || !['CEO', 'CFO', 'CTO', 'CPO'].includes(u.role)) ? `<button class="btn sm" onclick="uiUserEdit('${u.id}','${esc(u.fullName)}','${esc(u.email)}','${u.role}','${esc(u.studentId || '')}')">Edit</button>` : ''}
+        ${isCEO() && u.role !== 'CEO' ? `<button class="btn sm bad" title="Delete account (CEO only)" onclick="uiUserDelete('${u.id}','${esc(u.fullName)}','${esc(u.email)}')">Delete</button>` : ''}
       </td></tr>`).join('')}
   </table></div>`;
 }
@@ -1545,6 +1592,13 @@ async function uiUserEdit(id, fullName, email, role, studentId) {
     ...(d.isActive !== undefined && !isSelfEdit ? { isActive: !!d.isActive } : {}),
     ...(d.password ? { password: d.password } : {}),
   }));
+}
+
+function uiUserDelete(id, fullName, email) {
+  if (!confirm(`Permanently delete ${fullName} (${email})?\n\nTheir wallet, memberships and authored records will be removed. This cannot be undone.`)) return;
+  api('DELETE', `/users/${id}`)
+    .then(() => { toast(`${fullName} deleted`); render(); })
+    .catch((e) => toast(e.message, false));
 }
 
 /* ------------------------------ Invitations & Developer Onboarding ------------------------------ */

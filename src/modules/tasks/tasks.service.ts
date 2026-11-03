@@ -231,6 +231,7 @@ export class TasksService {
     priority?: string;
     sprintNumber?: number;
     assignedToId?: string;
+    assigneeIds?: string[];
     dueDate?: string;
     clientMilestoneId?: string;
   }) {
@@ -245,8 +246,17 @@ export class TasksService {
       ? (dto.sprintNumber ?? (await this.settings.currentSprint()))
       : await this.settings.currentSprint();
 
+    // v1.2 multi-assignee: assigneeIds is authoritative when provided;
+    // Task.assignedToId keeps the FIRST assignee (primary) for metrics/DPI.
+    const assigneeIds = dto.assigneeIds?.length
+      ? [...new Set(dto.assigneeIds)]
+      : dto.assignedToId
+        ? [dto.assignedToId]
+        : [];
+    const primaryAssigneeId = assigneeIds[0] ?? null;
+
     // BR-PM-01: TODO requires storyPoints + assignee; otherwise it lands in BACKLOG
-    const canTodo = Boolean(dto.assignedToId && sprintNumber);
+    const canTodo = Boolean(assigneeIds.length && sprintNumber);
     const status: TaskStatus = canTodo ? TaskStatus.TODO : TaskStatus.BACKLOG;
 
     const task = await this.prisma.task.create({
@@ -257,16 +267,20 @@ export class TasksService {
         storyPoints: points,
         priority: (dto.priority as any) || 'MEDIUM',
         sprintNumber,
-        assignedToId: dto.assignedToId,
+        assignedToId: primaryAssigneeId,
         assignedById: user.id,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
         clientMilestoneId: dto.clientMilestoneId,
         status,
+        ...(assigneeIds.length
+          ? { assignees: { create: assigneeIds.map((id) => ({ userId: id })) } }
+          : {}),
       },
+      include: { assignees: { include: { user: { select: { id: true, fullName: true } } } } },
     });
 
-    if (task.assignedToId && task.sprintNumber) {
-      await this.recomputeDevDpi(task.assignedToId, task.sprintNumber);
+    if (primaryAssigneeId && task.sprintNumber) {
+      await this.recomputeDevDpi(primaryAssigneeId, task.sprintNumber);
     }
 
     this.events.emitToRoom(this.events.squadRoom(task.squadId), 'task:created', {
@@ -276,11 +290,26 @@ export class TasksService {
       storyPoints: task.storyPoints,
       priority: task.priority,
     });
-    return this.enrichTaskWithDeadline(task);
+    return this.enrichTaskWithDeadline(this.shapeTask(task));
   }
 
-  private enrichTaskWithDeadline<T extends { dueDate?: Date | null; status?: any; flaggedCompleteAt?: Date | null; ctoVerifiedAt?: Date | null; updatedAt?: Date }>(task: T) {
-    const now = new Date();
+  /** Flattens the TaskAssignee join rows into a plain assignee list for API consumers. */
+  private shapeTask<T extends { assignees?: { userId: string; user?: { id: string; fullName: string } | null }[]; assignedToId?: string | null }>(task: T) {
+    const { assignees, ...rest } = task as any;
+    return {
+      ...rest,
+      assigneeIds: assignees?.length
+        ? assignees.map((a: any) => a.userId)
+        : task.assignedToId
+          ? [task.assignedToId]
+          : [],
+      assigneeNames: assignees?.length
+        ? assignees.map((a: any) => ({ id: a.user?.id ?? a.userId, fullName: a.user?.fullName ?? 'Unknown' }))
+        : [],
+    };
+  }
+
+  private enrichTaskWithDeadline<T extends { dueDate?: Date | null; status?: any; flaggedCompleteAt?: Date | null; ctoVerifiedAt?: Date | null; updatedAt?: Date }>(task: T) {    const now = new Date();
     const isCompleted = task.status === 'CTO_VERIFIED' || task.status === 'CLOSED';
     let isOverdue = false;
     let completedLate = false;
@@ -310,9 +339,22 @@ export class TasksService {
     priority?: string;
     dueDate?: string | null;
     assignedToId?: string | null;
+    assigneeIds?: string[];
   }) {
     const task = await this.getTaskOrThrow(taskId);
     await this.assertPmOrExec(user, task.squadId);
+
+    // v1.2 multi-assignee sync: assigneeIds (when provided) is authoritative.
+    const syncingAssignees = dto.assigneeIds !== undefined || dto.assignedToId !== undefined;
+    let nextAssigneeIds: string[] | undefined;
+    let nextPrimaryId: string | null | undefined;
+    if (dto.assigneeIds !== undefined) {
+      nextAssigneeIds = [...new Set(dto.assigneeIds)];
+      nextPrimaryId = nextAssigneeIds[0] ?? null;
+    } else if (dto.assignedToId !== undefined) {
+      nextAssigneeIds = dto.assignedToId ? [dto.assignedToId] : [];
+      nextPrimaryId = dto.assignedToId || null;
+    }
 
     const updated = await this.prisma.task.update({
       where: { id: taskId },
@@ -322,26 +364,50 @@ export class TasksService {
         ...(dto.storyPoints !== undefined ? { storyPoints: dto.storyPoints } : {}),
         ...(dto.priority !== undefined ? { priority: dto.priority as any } : {}),
         ...(dto.dueDate !== undefined ? { dueDate: dto.dueDate ? new Date(dto.dueDate) : null } : {}),
-        ...(dto.assignedToId !== undefined ? { assignedToId: dto.assignedToId || null } : {}),
+        ...(nextPrimaryId !== undefined ? { assignedToId: nextPrimaryId } : {}),
       },
       include: {
         assignedTo: { select: { id: true, fullName: true } },
         squad: { select: { id: true, name: true } },
+        assignees: { include: { user: { select: { id: true, fullName: true } } } },
       },
     });
+
+    // Replace the collaborator set (keep it aligned with the primary field).
+    if (syncingAssignees && nextAssigneeIds) {
+      await this.prisma.taskAssignee.deleteMany({ where: { taskId } });
+      if (nextAssigneeIds.length) {
+        await this.prisma.taskAssignee.createMany({
+          data: nextAssigneeIds.map((id) => ({ taskId, userId: id })),
+        });
+      }
+    }
 
     /*
      * BR-PM-01: assignment determines readiness. Without this flip a BACKLOG
      * task stayed stuck forever — no endpoint exposed the BACKLOG -> TODO move.
      */
+    const effectiveAssignees =
+      nextAssigneeIds !== undefined
+        ? nextAssigneeIds
+        : updated.assignees?.length
+          ? updated.assignees.map((a: any) => a.userId)
+          : updated.assignedToId
+            ? [updated.assignedToId]
+            : [];
+    const hasAssignee = effectiveAssignees.length > 0;
     let result: Task = updated;
-    if (updated.status === 'BACKLOG' && updated.assignedToId && updated.sprintNumber) {
+    if (updated.status === 'BACKLOG' && hasAssignee && updated.sprintNumber) {
       result = await this.transition(updated, TaskStatus.TODO, user.id, 'Assignee set — task ready for sprint');
-    } else if (updated.status === 'TODO' && !updated.assignedToId) {
+    } else if (updated.status === 'TODO' && !hasAssignee) {
       result = await this.transition(updated, TaskStatus.BACKLOG, user.id, 'Unassigned — returned to backlog');
     }
+    // attach the fresh collaborator set for shaping
+    const shaped = result === updated && syncingAssignees && nextAssigneeIds
+      ? { ...result, assignees: nextAssigneeIds.map((id) => ({ userId: id, user: null })) }
+      : result;
 
-    return this.enrichTaskWithDeadline(result);
+    return this.enrichTaskWithDeadline(this.shapeTask(shaped));
   }
 
   async listTasks(user: AuthUser, filters: { squadId?: string; status?: TaskStatus; assignedToId?: string; sprintNumber?: number }) {
@@ -365,9 +431,10 @@ export class TasksService {
       include: {
         assignedTo: { select: { id: true, fullName: true } },
         squad: { select: { id: true, name: true } },
+        assignees: { include: { user: { select: { id: true, fullName: true } } } },
       },
     });
-    return tasks.map((t) => this.enrichTaskWithDeadline(t));
+    return tasks.map((t) => this.enrichTaskWithDeadline(this.shapeTask(t)));
   }
 
   async getTask(user: AuthUser, taskId: string) {
@@ -376,13 +443,14 @@ export class TasksService {
       include: {
         assignedTo: { select: { id: true, fullName: true } },
         squad: { select: { id: true, name: true } },
+        assignees: { include: { user: { select: { id: true, fullName: true } } } },
         auditEvents: { orderBy: { createdAt: 'desc' }, include: { changedBy: { select: { id: true, fullName: true, role: true } } } },
       },
     });
     if (!task) throw new NotFoundException('Task not found');
     const isExec = isExecRole(user.role);
     if (!isExec && !user.squadIds.includes(task.squadId)) throw new ForbiddenException('AUTHZ_CROSS_SQUAD');
-    return this.enrichTaskWithDeadline(task);
+    return this.enrichTaskWithDeadline(this.shapeTask(task));
   }
 
   private async assertPmOrExec(user: AuthUser, squadId: string) {
@@ -420,10 +488,19 @@ export class TasksService {
     const task = await this.getTaskOrThrow(taskId);
     this.assertTransition(task, TaskStatus.IN_PROGRESS);
     await this.chaos.assertNotLockedOut(user.id);
-    if (task.assignedToId !== user.id) {
+    if (!(await this.isTaskAssignee(task, user.id))) {
       await this.assertPmOrExec(user, task.squadId);
     }
     return this.transition(task, TaskStatus.IN_PROGRESS, user.id, 'Work started');
+  }
+
+  /** True for the primary assignee or any TaskAssignee collaborator (v1.2). */
+  private async isTaskAssignee(task: Task, userId: string): Promise<boolean> {
+    if (task.assignedToId === userId) return true;
+    const row = await this.prisma.taskAssignee.findUnique({
+      where: { taskId_userId: { taskId: task.id, userId } },
+    });
+    return Boolean(row);
   }
 
   /** IN_PROGRESS -> FLAGGED_COMPLETE with mandatory git proof (BR-DEV-01..04). */
@@ -432,8 +509,8 @@ export class TasksService {
     if (task.status !== TaskStatus.IN_PROGRESS) {
       throw new BadRequestException('TASK_INVALID_TRANSITION: task must be IN_PROGRESS to flag complete');
     }
-    if (task.assignedToId !== user.id) {
-      throw new ForbiddenException('Only the assigned developer can flag completion');
+    if (!(await this.isTaskAssignee(task, user.id))) {
+      throw new ForbiddenException('Only an assigned task member can flag completion');
     }
     await this.chaos.assertNotLockedOut(user.id);
     const prUrl = dto.gitPrUrl?.trim() || undefined;

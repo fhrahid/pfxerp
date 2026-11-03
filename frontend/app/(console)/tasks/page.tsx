@@ -80,7 +80,7 @@ export default function TasksPage() {
   /** Drag & drop + card button transition resolver — mirrors the server state machine & RBAC. */
   const resolveMove = (t: any, to: string): { kind: string; ok: boolean; reason?: string } => {
     if (t.status === to) return { kind: "none", ok: false };
-    const isAssignee = t.assignedToId === myId;
+    const isAssignee = t.assignedToId === myId || (t.assigneeIds || []).includes(myId);
     const isPmOrCeo = role === "PM" || role === "CEO";
     const isCtoOrCeo = role === "CTO" || role === "CEO";
     const isPmCtoOrCeo = isPmOrCeo || role === "CTO";
@@ -131,7 +131,7 @@ export default function TasksPage() {
           await runAction("POST", `/tasks/${t.id}/close`);
           break;
         case "unassign":
-          await runAction("PATCH", `/tasks/${t.id}`, { assignedToId: null });
+          await runAction("PATCH", `/tasks/${t.id}`, { assigneeIds: [] });
           break;
         case "assign":
         case "flag":
@@ -245,7 +245,7 @@ export default function TasksPage() {
           members={memberOptions}
           onClose={() => setDialog(null)}
           onSubmit={async (kind, task, data) => {
-            if (kind === "assign") await runAction("PATCH", `/tasks/${task.id}`, { assignedToId: data.assignedToId });
+            if (kind === "assign") await runAction("PATCH", `/tasks/${task.id}`, { assigneeIds: data.assigneeIds });
             else if (kind === "flag") await runAction("POST", `/tasks/${task.id}/flag-complete`, data);
             else if (kind === "pmReject")
               await runAction("POST", `/tasks/${task.id}/pm-reject`, {
@@ -280,10 +280,10 @@ function DropDialogs({
       <FormDialog
         {...common}
         title={`Assign "${task.title}"`}
-        description="Assigning a member moves the task from BACKLOG into the sprint TODO column."
-        fields={[{ name: "assignedToId", label: "Assignee", type: "select" as const, options: members, required: true }]}
+        description="Pick one or more collaborators — the task moves from BACKLOG into TODO."
+        fields={[{ name: "assigneeIds", label: "Assignees (developers and the PM)", type: "checkboxes" as const, options: members }]}
         submitLabel="Assign"
-        onSubmit={(d) => onSubmit(kind, task, d)}
+        onSubmit={(d) => onSubmit(kind, task, { ...d, assigneeIds: d.assigneeIds || [] })}
       />
     );
   if (kind === "flag")
@@ -380,7 +380,11 @@ function TaskCard({
               </Badge>
             ) : null}
           </div>
-          <div className="mt-1 text-[11px] text-muted-foreground">{t.assignedTo?.fullName || "unassigned"}</div>
+          <div className="mt-1 text-[11px] text-muted-foreground">
+            {(t.assigneeNames || []).length
+              ? (t.assigneeNames || []).map((a: any) => a.fullName).join(", ")
+              : t.assignedTo?.fullName || "unassigned"}
+          </div>
           {primary ? (
             <div className="mt-2">
               <span
@@ -486,9 +490,9 @@ function CreateTaskButton({ squadId }: { squadId: string }) {
     queryFn: () => api<any>("GET", `/squads/${squadId}`),
     enabled: Boolean(squadId),
   });
-  const devOptions = (detail.data?.members || [])
-    .filter((m: any) => m.role === "DEVELOPER")
-    .map((m: any) => ({ value: m.userId, label: m.fullName }));
+  const memberOptions = (detail.data?.members || [])
+    .filter((m: any) => m.role === "DEVELOPER" || m.role === "PM")
+    .map((m: any) => ({ value: m.userId, label: `${m.fullName} (${m.role})` }));
 
   return (
     <FormDialog
@@ -510,11 +514,10 @@ function CreateTaskButton({ squadId }: { squadId: string }) {
           value: "MEDIUM",
         },
         {
-          name: "assignedToId",
-          label: "Assignee (leave empty for backlog)",
-          type: "select",
-          options: [{ value: "", label: "— leave in backlog —" }, ...devOptions],
-          value: "",
+          name: "assigneeIds",
+          label: "Assignees — pick one or more (leave empty for backlog)",
+          type: "checkboxes",
+          options: memberOptions,
         },
         {
           name: "dueDate",
@@ -529,7 +532,7 @@ function CreateTaskButton({ squadId }: { squadId: string }) {
           title: d.title,
           description: d.description,
           priority: d.priority,
-          ...(d.assignedToId ? { assignedToId: d.assignedToId } : {}),
+          assigneeIds: d.assigneeIds || [],
           dueDate: d.dueDate ? new Date(d.dueDate).toISOString() : undefined,
         })
       }

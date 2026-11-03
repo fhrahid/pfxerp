@@ -200,6 +200,70 @@ export class UsersService {
   }
 
   /**
+   * CEO-only: permanently delete a user account and the records they own.
+   * Self-deletion and deleting the sitting CEO are blocked outright.
+   */
+  async deleteUser(caller: { id: string; role: string }, userId: string) {
+    if (caller.role !== UserRole.CEO) {
+      throw new AppException('AUTHZ_FORBIDDEN', 'Only the Chief Executive Officer (CEO) has authority to delete accounts.');
+    }
+    if (caller.id === userId) {
+      throw new AppException('AUTHZ_FORBIDDEN', 'You cannot delete your own account.');
+    }
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { account: true },
+    });
+    if (!user) throw new NotFoundException('User not found');
+    if (user.role === UserRole.CEO) {
+      throw new AppException('AUTHZ_FORBIDDEN', 'CEO accounts cannot be deleted. Transfer leadership first.');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      // 1. audit the destructive action BEFORE removing its subject
+      await tx.executiveAuditLog.create({
+        data: {
+          executiveId: caller.id,
+          executiveRole: UserRole.CEO,
+          actionType: 'USER_DELETED',
+          riskSeverity: 'CRITICAL',
+          payloadSnapshot: {
+            deletedUserId: userId,
+            email: user.email,
+            fullName: user.fullName,
+            role: user.role,
+          },
+        },
+      });
+
+      // 2. records the schema pins with Restrict — authored by this user
+      await tx.ledgerEntry.deleteMany({ where: { transaction: { authorizedById: userId } } });
+      await tx.ledgerTransaction.deleteMany({ where: { authorizedById: userId } });
+      await tx.notice.deleteMany({ where: { OR: [{ senderId: userId }, { recipientId: userId }] } });
+      await tx.bugReport.deleteMany({ where: { reportingUserId: userId } });
+      await tx.codeAuditCitation.deleteMany({ where: { citedById: userId } });
+      await tx.consultancyBooking.deleteMany({ where: { OR: [{ consultantId: userId }, { bookedById: userId }] } });
+      await tx.marketplacePurchase.deleteMany({ where: { buyerUserId: userId } });
+      await tx.boardDecision.deleteMany({ where: { proposedById: userId } });
+      await tx.chaosEvent.deleteMany({ where: { triggeredById: userId } });
+      await tx.developerPerformanceSnapshot.deleteMany({ where: { userId } });
+      await tx.pmPerformanceSnapshot.deleteMany({ where: { userId } });
+
+      // 3. ledger entries on the user's personal wallet (Restrict on Account)
+      if (user.account) {
+        await tx.ledgerEntry.deleteMany({ where: { accountId: user.account.id } });
+        await tx.ledgerTransaction.deleteMany({ where: { entries: { none: {} } } });
+      }
+
+      // 4. Prisma cascades the rest: wallet, memberships, task audit events,
+      //    task references SetNull, invitations sent, password resets, votes…
+      await tx.user.delete({ where: { id: userId } });
+    });
+
+    return { success: true, deleted: userId, email: user.email };
+  }
+
+  /**
    * Detailed profile view including work history, performance metrics (DPI/PMHI),
    * and missed deadline / overdue tracking.
    */

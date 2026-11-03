@@ -2,7 +2,8 @@
 
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
-import { UserPlus, ExternalLink } from "lucide-react";
+import { UserPlus, ExternalLink, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { api, ROLES } from "@/lib/api";
 import { useMe } from "@/components/shell";
 import { FormDialog } from "@/components/form-dialog";
@@ -137,8 +138,7 @@ export default function PeoplePage() {
                       >
                         {copied === u.id ? "Copied!" : "ID"}
                       </Button>
-                      {manage && (isCeo || !ROLES.isExec(u.role)) ? (
-                        <FormDialog
+                      {manage && (isCeo || !ROLES.isExec(u.role)) ? (                        <FormDialog
                           trigger={
                             <Button size="sm" variant="outline" className="h-8 text-xs">
                               Edit
@@ -193,6 +193,30 @@ export default function PeoplePage() {
                             })
                           }
                         />
+                      ) : null}
+                      {isCeo && u.role !== "CEO" ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 text-xs text-destructive hover:text-destructive"
+                          title="Delete account permanently (CEO only)"
+                          onClick={() => {
+                            if (
+                              !window.confirm(
+                                `Permanently delete ${u.fullName} (${u.email})?\n\nThis removes their wallet, memberships and authored records. This cannot be undone.`,
+                              )
+                            )
+                              return;
+                            api("DELETE", `/users/${u.id}`)
+                              .then(() => {
+                                toast.success(`${u.fullName} deleted`);
+                                users.refetch();
+                              })
+                              .catch((err: Error) => toast.error(err.message || "Delete failed"));
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       ) : null}
                     </div>
                   </TableCell>

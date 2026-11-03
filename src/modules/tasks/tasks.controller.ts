@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
-import { IsBoolean, IsDateString, IsEnum, IsInt, IsOptional, IsString, IsUUID, Max, Min, MinLength } from 'class-validator';
+import { IsArray, IsBoolean, IsDateString, IsEnum, IsInt, IsOptional, IsString, IsUUID, Max, Min, MinLength } from 'class-validator';
 import { TaskPriority, TaskStatus, UserRole } from '@prisma/client';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Roles, CurrentUser } from '../../common/decorators';
@@ -36,6 +36,12 @@ class CreateTaskDto {
   @IsUUID()
   assignedToId?: string;
 
+  /** v1.2: multiple collaborators; first entry becomes the primary assignee. */
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  assigneeIds?: string[];
+
   @IsOptional()
   @IsDateString()
   dueDate?: string;
@@ -71,7 +77,13 @@ class UpdateTaskDto {
 
   @IsOptional()
   @IsUUID()
-  assignedToId?: string;
+  assignedToId?: string | null;
+
+  /** v1.2: replaces the whole collaborator set; first entry becomes primary. */
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  assigneeIds?: string[];
 }
 
 class FlagCompleteDto {
