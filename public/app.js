@@ -522,6 +522,7 @@ async function viewOverview() {
   } catch { /* */ }
 
   let ceoHtml = '';
+  let cfoHtml = '';
   if (isCEO()) {
     try {
       const ceoData = await api('GET', '/dashboard/ceo');
@@ -593,6 +594,26 @@ async function viewOverview() {
     }
   }
 
+  if (isCFO()) {
+    try {
+      const cfoData = await api('GET', '/dashboard/cfo');
+      cfoHtml = `
+        <div class="panel" style="margin-top:16px;border-color:rgba(59,130,246,.3)">
+          <h3>CFO Treasury & Capital Overview</h3>
+          <div class="cards">
+            <div class="card"><div class="k">Cash in circulation</div><div class="v money">${money(cfoData.cashInCirculation)}</div><div class="muted">Personal wallets + squad treasuries</div></div>
+            <div class="card"><div class="k">Outstanding loans</div><div class="v">${cfoData.activeLoanCount || 0} active</div><div class="muted">Principal ${money(cfoData.outstandingLoanPrincipal)} · due ${money(cfoData.outstandingLoanDue)}</div></div>
+            <div class="card"><div class="k">Equity investments</div><div class="v money">${money(cfoData.totalInvested)}</div><div class="muted">${cfoData.activeInvestmentCount || 0} active stakes</div></div>
+            <div class="card"><div class="k">System reserve</div><div class="v money">${money(cfoData.systemReserveBalance)}</div><div class="muted">Available funding pool</div></div>
+          </div>
+          <h4 style="margin:14px 0 7px">Loan book</h4>
+          <table><tr><th>Squad</th><th>Principal</th><th>Total due</th><th>Status</th><th>Due date</th></tr>
+            ${(cfoData.loanBook || []).map((l) => `<tr><td>${esc(l.squad)}</td><td class="money">${money(l.principal)}</td><td class="money">${money(l.totalDue)}</td><td>${statusBadge(l.status)}</td><td>${dt(l.dueDate)}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">No loans</td></tr>'}
+          </table>
+        </div>`;
+    } catch (e) { cfoHtml = `<div class="panel"><div class="muted">CFO overview unavailable: ${esc(e.message)}</div></div>`; }
+  }
+
   C().innerHTML = `
     <div class="cards">
       <div class="card"><div class="k">My Wallet</div><div class="v money">${money(me.walletBalance)}</div></div>
@@ -601,6 +622,7 @@ async function viewOverview() {
       <div class="card"><div class="k">My Squads</div><div class="v">${me.squads?.length || 0}</div></div>
     </div>
     ${ceoHtml}
+    ${cfoHtml}
     ${me.squads?.length ? `<div class="panel"><h3>My squads</h3><table><tr><th>Squad</th><th>Treasury</th><th>Health</th></tr>
       ${me.squads.map((s) => `<tr><td>${esc(s.name)}</td><td class="money">${money(s.balance)}</td><td class="health-${s.health}">${statusBadge(s.health)}</td></tr>`).join('')}</table></div>` : ''}
     ${noticesHtml}`;

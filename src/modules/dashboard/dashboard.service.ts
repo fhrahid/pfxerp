@@ -415,15 +415,16 @@ export class DashboardService {
 
   async cfoDashboard() {
     const squads = await this.refreshSquadMetrics();
-    const loans = await this.prisma.loan.findMany({
+    const [loans, accounts] = await Promise.all([this.prisma.loan.findMany({
       orderBy: { createdAt: 'desc' },
       include: { borrowerSquad: { select: { name: true } } },
-    });
+    }), this.prisma.account.findMany({ select: { type: true, balance: true } })]);
     const cfo = await this.prisma.user.findFirst({ where: { role: 'CFO' }, include: { account: true } });
     const stakes = await this.prisma.equityStake.findMany({
       where: { isActive: true },
       include: { squad: { select: { name: true, valuation: true } } },
     });
+    const outstandingLoans = loans.filter((l) => !l.repaidAt && l.status !== 'REPAID');
     return {
       squadRunwayMatrix: squads,
       loanBook: loans.map((l) => ({
@@ -436,6 +437,15 @@ export class DashboardService {
       })),
       equityPortfolio: stakes,
       cfoWalletBalance: cfo?.account ? Number(cfo.account.balance) : 0,
+      cashInCirculation: accounts
+        .filter((a) => a.type === 'PERSONAL_WALLET' || a.type === 'SQUAD_TREASURY')
+        .reduce((sum, a) => sum + Number(a.balance), 0),
+      systemReserveBalance: accounts.filter((a) => a.type === 'SYSTEM_RESERVE').reduce((sum, a) => sum + Number(a.balance), 0),
+      activeLoanCount: loans.filter((l) => l.status === 'ACTIVE' && !l.repaidAt).length,
+      outstandingLoanPrincipal: outstandingLoans.reduce((sum, l) => sum + Number(l.principalAmount), 0),
+      outstandingLoanDue: outstandingLoans.reduce((sum, l) => sum + Number(l.totalDue), 0),
+      activeInvestmentCount: stakes.length,
+      totalInvested: stakes.reduce((sum, s) => sum + Number(s.investedAmount), 0),
     };
   }
 

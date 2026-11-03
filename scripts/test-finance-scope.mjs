@@ -30,6 +30,9 @@ const [ceo, cfo, pm, dev] = await Promise.all([
 const [ceoAccounts, cfoAccounts, pmAccounts, devAccounts] = await Promise.all([
   get(ceo, '/ledger/accounts'), get(cfo, '/ledger/accounts'), get(pm, '/ledger/accounts'), get(dev, '/ledger/accounts'),
 ]);
+const cfoOverview = await get(cfo, '/dashboard/cfo');
+assert(Number.isFinite(cfoOverview.cashInCirculation), 'CFO overview exposes cash in circulation');
+assert(Number.isFinite(cfoOverview.outstandingLoanPrincipal) && Number.isFinite(cfoOverview.totalInvested), 'CFO overview exposes loan and investment totals');
 assert(ceoAccounts.some((a) => a.type === 'SYSTEM_RESERVE'), 'CEO sees the system reserve');
 assert(cfoAccounts.some((a) => a.type === 'SYSTEM_RESERVE'), 'CFO sees the system reserve');
 assert(!pmAccounts.some((a) => a.type === 'SYSTEM_RESERVE'), 'PM cannot see the system reserve');
