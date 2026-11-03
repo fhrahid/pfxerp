@@ -41,7 +41,7 @@ export function TaskActions({ task: t, onChanged }: { task: any; onChanged?: () 
         />
       ) : null}
 
-      {t.status === "FLAGGED_COMPLETE" && (ROLES_PM(role) || ROLES_EXEC(role)) ? (
+      {t.status === "FLAGGED_COMPLETE" && (role === "PM" || role === "CEO") ? (
         <>
           <FormDialog
             trigger={<Button size="sm" variant="success">PM verify</Button>}
@@ -91,7 +91,7 @@ export function TaskActions({ task: t, onChanged }: { task: any; onChanged?: () 
         </>
       ) : null}
 
-      {t.status === "CTO_VERIFIED" && (ROLES_PM(role) || role === "CTO") ? (
+      {t.status === "CTO_VERIFIED" && (ROLES_PM(role) || role === "CTO" || role === "CEO") ? (
         <Button size="sm" onClick={() => run("POST", `/tasks/${t.id}/close`)}>
           Close
         </Button>
@@ -101,4 +101,3 @@ export function TaskActions({ task: t, onChanged }: { task: any; onChanged?: () 
 }
 
 const ROLES_PM = (r: string) => r === "PM";
-const ROLES_EXEC = (r: string) => ["CEO", "CTO", "CPO"].includes(r);

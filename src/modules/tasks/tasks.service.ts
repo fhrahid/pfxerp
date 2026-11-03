@@ -330,7 +330,18 @@ export class TasksService {
       },
     });
 
-    return this.enrichTaskWithDeadline(updated);
+    /*
+     * BR-PM-01: assignment determines readiness. Without this flip a BACKLOG
+     * task stayed stuck forever — no endpoint exposed the BACKLOG -> TODO move.
+     */
+    let result: Task = updated;
+    if (updated.status === 'BACKLOG' && updated.assignedToId && updated.sprintNumber) {
+      result = await this.transition(updated, TaskStatus.TODO, user.id, 'Assignee set — task ready for sprint');
+    } else if (updated.status === 'TODO' && !updated.assignedToId) {
+      result = await this.transition(updated, TaskStatus.BACKLOG, user.id, 'Unassigned — returned to backlog');
+    }
+
+    return this.enrichTaskWithDeadline(result);
   }
 
   async listTasks(user: AuthUser, filters: { squadId?: string; status?: TaskStatus; assignedToId?: string; sprintNumber?: number }) {
@@ -380,6 +391,28 @@ export class TasksService {
       where: { userId: user.id, squadId, role: 'PM', leftAt: null },
     });
     if (!m) throw new ForbiddenException('Only the squad PM or an executive may manage this squad\'s tasks');
+  }
+
+  /**
+   * PM-gate actions (verify/reject) are reserved for the squad's own PM.
+   * Only the CEO (supreme authority) may act on another squad's behalf.
+   */
+  private async assertSquadPmOrCeo(user: AuthUser, squadId: string) {
+    if (user.role === UserRole.CEO) return;
+    if (user.role === UserRole.PM) {
+      const m = await this.prisma.squadMembership.findFirst({
+        where: { userId: user.id, squadId, role: 'PM', leftAt: null },
+      });
+      if (m) return;
+    }
+    throw new ForbiddenException('PM verification is reserved for the squad\'s Project Manager (or the CEO).');
+  }
+
+  /** CTO quality gate is CTO-exclusive; only the CEO may act in the CTO's stead. */
+  private assertCtoOrCeo(user: AuthUser) {
+    if (user.role !== UserRole.CTO && user.role !== UserRole.CEO) {
+      throw new ForbiddenException('The quality audit is reserved for the CTO (or the CEO).');
+    }
   }
 
   /** TODO -> IN_PROGRESS (BR-PM-02: assignee or squad PM only). */
@@ -432,13 +465,13 @@ export class TasksService {
     );
   }
 
-  /** FLAGGED_COMPLETE -> PM_VERIFIED (BR-PM-05). */
+  /** FLAGGED_COMPLETE -> PM_VERIFIED (BR-PM-05). PM-gate: squad PM only (CEO may override). */
   async pmVerify(user: AuthUser, taskId: string, comment?: string) {
     const task = await this.getTaskOrThrow(taskId);
     if (task.status !== TaskStatus.FLAGGED_COMPLETE) {
       throw new BadRequestException('Task is not awaiting PM verification');
     }
-    await this.assertPmOrExec(user, task.squadId);
+    await this.assertSquadPmOrCeo(user, task.squadId);
     if (task.assignedToId === user.id) {
       throw new ForbiddenException('Self-verification conflict: escalate to CTO or peer PM (pm.md §9.1)');
     }
@@ -452,13 +485,13 @@ export class TasksService {
     });
   }
 
-  /** FLAGGED_COMPLETE -> IN_PROGRESS with premature-flag penalty (BR-PM-04, BR-DEV-05..07). */
+  /** FLAGGED_COMPLETE -> IN_PROGRESS with premature-flag penalty (BR-PM-04, BR-DEV-05..07). PM-gate: squad PM only. */
   async pmReject(user: AuthUser, taskId: string, dto: { isPremature: boolean; penaltyPoints?: number; feedback: string }) {
     const task = await this.getTaskOrThrow(taskId);
     if (task.status !== TaskStatus.FLAGGED_COMPLETE) {
       throw new BadRequestException('Task is not awaiting PM verification');
     }
-    await this.assertPmOrExec(user, task.squadId);
+    await this.assertSquadPmOrCeo(user, task.squadId);
 
     let penalty = dto.penaltyPoints ?? 15;
     penalty = Math.max(15, Math.min(50, penalty));
@@ -483,8 +516,9 @@ export class TasksService {
     return { ...updated, penaltyDeducted: penalty };
   }
 
-  /** PM_VERIFIED -> CTO_VERIFIED (BR-CTO-08..10). */
+  /** PM_VERIFIED -> CTO_VERIFIED (BR-CTO-08..10). CTO-exclusive gate (CEO may override). */
   async ctoVerify(user: AuthUser, taskId: string, dto: { critique?: string; testCoveragePercent?: number }) {
+    this.assertCtoOrCeo(user);
     const task = await this.getTaskOrThrow(taskId);
     if (task.status !== TaskStatus.PM_VERIFIED) {
       throw new BadRequestException('Task must be in PM_VERIFIED status for CTO audit');
@@ -513,8 +547,9 @@ export class TasksService {
     return updated;
   }
 
-  /** PM_VERIFIED -> IN_PROGRESS with squad fine + PMHI demerit (BR-CTO-11..14). */
+  /** PM_VERIFIED -> IN_PROGRESS with squad fine + PMHI demerit (BR-CTO-11..14). CTO-exclusive gate. */
   async ctoReject(user: AuthUser, taskId: string, dto: { critique: string; citationType: 'CODE_SMELL' | 'BAD_MERGE_REQUEST' | 'SECURITY_VULNERABILITY' }) {
+    this.assertCtoOrCeo(user);
     if (!dto.critique || dto.critique.length < 20) {
       throw new BadRequestException('CTO rejection critique must be at least 20 characters (BR-CTO-14)');
     }

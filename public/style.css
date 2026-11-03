@@ -337,6 +337,9 @@ tr:hover td { background: rgba(255, 255, 255, 0.025); }
   border-color: rgba(59, 130, 246, 0.5); transform: translateY(-2px);
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
 }
+.kcard[draggable="true"] { cursor: grab; }
+.kcard[draggable="true"]:active { cursor: grabbing; }
+.kcol.dragok { border-color: rgba(59, 130, 246, 0.7); background: rgba(59, 130, 246, 0.07); }
 .kcard .t { font-weight: 600; font-size: 13px; line-height: 1.4; color: #fff; }
 .kcard .m { color: var(--muted); font-size: 12px; margin-top: 6px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .kcard .badge-sp {

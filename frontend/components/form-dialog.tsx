@@ -40,7 +40,10 @@ export interface FormField {
 }
 
 interface FormDialogProps {
-  trigger: React.ReactNode;
+  trigger?: React.ReactNode;
+  /** Controlled mode — enables opening the dialog programmatically (e.g. drag & drop). */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   title: string;
   description?: string;
   fields: FormField[];
@@ -54,9 +57,14 @@ interface FormDialogProps {
  * Generic form dialog: renders a configured field set, validates required
  * inputs client-side, and surfaces API errors as toasts.
  */
-export function FormDialog({ trigger, title, description, fields, submitLabel, onSubmit, wide, extra }: FormDialogProps) {
-  const [open, setOpen] = React.useState(false);
+export function FormDialog({ trigger, open, onOpenChange, title, description, fields, submitLabel, onSubmit, wide, extra }: FormDialogProps) {
+  const [innerOpen, setInnerOpen] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
+  const isOpen = open !== undefined ? open : innerOpen;
+  const setOpen = (v: boolean) => {
+    setInnerOpen(v);
+    onOpenChange?.(v);
+  };
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -79,8 +87,8 @@ export function FormDialog({ trigger, title, description, fields, submitLabel, o
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>{trigger}</DialogTrigger>
+    <Dialog open={isOpen} onOpenChange={setOpen}>
+      {trigger ? <DialogTrigger asChild>{trigger}</DialogTrigger> : null}
       <DialogContent className={cn("sm:max-w-lg", wide && "sm:max-w-2xl")}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>

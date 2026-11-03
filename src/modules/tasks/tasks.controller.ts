@@ -169,13 +169,13 @@ export class TasksController {
   }
 
   @Post(':id/pm-verify')
-  @Roles(UserRole.PM, UserRole.CTO, UserRole.CPO)
+  @Roles(UserRole.PM)
   pmVerify(@Param('id') id: string, @Body() body: { comment?: string }, @CurrentUser() user: AuthUser) {
     return this.tasks.pmVerify(user, id, body.comment);
   }
 
   @Post(':id/pm-reject')
-  @Roles(UserRole.PM, UserRole.CTO, UserRole.CPO)
+  @Roles(UserRole.PM)
   pmReject(@Param('id') id: string, @Body() dto: PmRejectDto, @CurrentUser() user: AuthUser) {
     return this.tasks.pmReject(user, id, dto);
   }

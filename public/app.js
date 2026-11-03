@@ -587,6 +587,7 @@ async function viewKanban() {
   if (!squadOpts.length) { C().innerHTML = '<div class="panel empty">No squad membership</div>'; return; }
   if (!S.kanbanSquad || !squadOpts.find((s) => s.id === S.kanbanSquad)) S.kanbanSquad = squadOpts[0].id;
   const tasks = await api('GET', '/tasks?squadId=' + S.kanbanSquad);
+  S.tasks = tasks; // card buttons / drag & drop lookups
   const byStatus = {};
   KANBAN_COLS.forEach((c) => (byStatus[c] = []));
   tasks.forEach((t) => (byStatus[t.status] || (byStatus[t.status] = [])).push(t));
@@ -598,11 +599,13 @@ async function viewKanban() {
     ${isPM() || isExec() ? `<button class="btn primary" onclick="uiTaskCreate('${S.kanbanSquad}')">+ New task</button>` : ''}`);
 
   C().innerHTML = `<div class="kanban">${KANBAN_COLS.map((col) => `
-    <div class="kcol"><h4><span>${col.replace('_', ' ')}</span><span>${byStatus[col].length}</span></h4>
+    <div class="kcol" data-col="${col}" ondragover="kDragOver(event)" ondragleave="kDragLeave(event)" ondrop="kDrop(event, '${col}')">
+      <h4><span>${col.replace('_', ' ')}</span><span>${byStatus[col].length}</span></h4>
       ${byStatus[col].map((t) => {
         const isMissed = t.isOverdue || (t.dueDate && new Date(t.dueDate) < new Date() && t.status !== 'CLOSED');
+        const next = kPrimaryMove(t);
         return `
-        <div class="kcard" onclick="uiTaskDetail('${t.id}')">
+        <div class="kcard" draggable="true" ondragstart="kDragStart(event, '${t.id}')" ondragend="kDragEnd(event)" onclick="uiTaskDetail('${t.id}')">
           <div class="t">${esc(t.title)}</div>
           <div class="m">
             <span class="badge-sp">${t.storyPoints ? t.storyPoints + ' SP' : '—'}</span>
@@ -615,10 +618,94 @@ async function viewKanban() {
             <span>${esc(t.assignedTo?.fullName || 'unassigned')}</span>
             ${t.squad ? `<span style="opacity:0.75;">${esc(t.squad.name)}</span>` : ''}
           </div>
+          ${next ? `<button class="btn primary sm" style="margin-top:6px;width:100%" onclick="event.stopPropagation();kMove('${t.id}','${next.to}')">${next.label} →</button>` : ''}
         </div>`;
       }).join('') || '<div class="muted" style="font-size:11.5px;padding:6px 2px">—</div>'}
     </div>`).join('')}
   </div>`;
+}
+
+/* ---------------- Kanban drag & drop + card action buttons ---------------- */
+let kDragging = null;
+
+function kDragStart(e, id) {
+  kDragging = id;
+  e.dataTransfer.setData('text/plain', id);
+  e.dataTransfer.effectAllowed = 'move';
+}
+
+function kDragEnd() { kDragging = null; document.querySelectorAll('.kcol.dragok').forEach((el) => el.classList.remove('dragok')); }
+
+function kDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  e.currentTarget.classList.add('dragok');
+}
+
+function kDragLeave(e) { e.currentTarget.classList.remove('dragok'); }
+
+function kDrop(e, col) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('dragok');
+  const id = kDragging || e.dataTransfer.getData('text/plain');
+  kDragging = null;
+  if (id) kMove(id, col);
+}
+
+/** Mirrors the server state machine + RBAC: returns the next forward move for a card button. */
+function kPrimaryMove(t) {
+  const map = {
+    BACKLOG: { label: 'Assign', to: 'TODO' },
+    TODO: { label: 'Start', to: 'IN_PROGRESS' },
+    IN_PROGRESS: { label: 'Flag ✓', to: 'FLAGGED_COMPLETE' },
+    FLAGGED_COMPLETE: { label: 'PM verify', to: 'PM_VERIFIED' },
+    PM_VERIFIED: { label: 'CTO pass', to: 'CTO_VERIFIED' },
+    CTO_VERIFIED: { label: 'Close', to: 'CLOSED' },
+  };
+  const next = map[t.status];
+  if (!next) return null;
+  return kCanMove(t, next.to).ok ? next : null;
+}
+
+function kCanMove(t, to) {
+  if (t.status === to) return { ok: false, reason: 'Already there' };
+  const isAssignee = t.assignedToId === S.user.id;
+  const isPmOrCeo = isPM() || isCEO();
+  const isCtoOrCeo = isCTO() || isCEO();
+  const rules = {
+    'BACKLOG->TODO': { ok: isPM() || isCPO() || isCTO() || isCEO(), dialog: 'assign', reason: 'Only squad leadership can assign' },
+    'TODO->BACKLOG': { ok: isPM() || isCPO() || isCTO() || isCEO(), act: ['PATCH', `/tasks/${t.id}`, { assignedToId: null }], reason: 'Only squad leadership can unassign' },
+    'TODO->IN_PROGRESS': { ok: isAssignee || isPM() || isCPO() || isCTO() || isCEO(), act: ['POST', `/tasks/${t.id}/start`], reason: 'Only the assignee or squad leadership can start work' },
+    'IN_PROGRESS->FLAGGED_COMPLETE': { ok: isAssignee, dialog: 'flag', reason: 'Only the assigned developer can flag completion' },
+    'FLAGGED_COMPLETE->PM_VERIFIED': { ok: isPmOrCeo, act: ['POST', `/tasks/${t.id}/pm-verify`, { comment: 'Acceptance criteria met, commits verified.' }], reason: 'PM verification is reserved for the squad PM (or CEO)' },
+    'FLAGGED_COMPLETE->IN_PROGRESS': { ok: isPmOrCeo, dialog: 'pmReject', reason: 'PM rejection is reserved for the squad PM (or CEO)' },
+    'PM_VERIFIED->CTO_VERIFIED': { ok: isCtoOrCeo, act: ['POST', `/tasks/${t.id}/cto-verify`, { critique: 'Clean architecture, coverage verified.' }], reason: 'The quality audit is reserved for the CTO (or CEO)' },
+    'PM_VERIFIED->IN_PROGRESS': { ok: isCtoOrCeo, dialog: 'ctoReject', reason: 'CTO rejection is reserved for the CTO (or CEO)' },
+    'CTO_VERIFIED->CLOSED': { ok: isPmOrCeo || isCTO(), act: ['POST', `/tasks/${t.id}/close`], reason: 'Only the PM or CTO can close a verified task' },
+  };
+  return rules[`${t.status}->${to}`] || { ok: false, reason: `Invalid transition: ${t.status} → ${to}` };
+}
+
+async function kMove(id, to) {
+  const t = (S.tasks || []).find((x) => x.id === id) || await api('GET', `/tasks/${id}`);
+  if (!t) return;
+  const rule = kCanMove(t, to);
+  if (!rule.ok) { toast(rule.reason || 'You cannot perform this move', false); return; }
+  if (rule.act) { act(rule.act[0], rule.act[1], rule.act[2]); return; }
+  if (rule.dialog === 'flag') { uiFlag(id); return; }
+  if (rule.dialog === 'pmReject') { uiPmReject(id); return; }
+  if (rule.dialog === 'ctoReject') { uiCtoReject(id); return; }
+  if (rule.dialog === 'assign') {
+    let members = [];
+    try {
+      const detail = await api('GET', `/squads/${t.squadId}`);
+      members = (detail.members || []).filter((m) => m.role === 'DEVELOPER' || m.role === 'PM');
+    } catch (_) {}
+    if (!members.length) { toast('No squad members available to assign', false); return; }
+    formModal(`Assign "${t.title}"`, [
+      { name: 'assignedToId', label: 'Assignee', type: 'select', required: true, options: members.map((m) => ({ value: m.userId, label: `${m.fullName} (${m.role})` })) },
+    ], 'Assign — moves to TODO', (d) => act('PATCH', `/tasks/${id}`, { assignedToId: d.assignedToId }));
+  }
 }
 
 function uiSetSprint() {
@@ -731,9 +818,9 @@ async function uiTaskDetail(id) {
   // work on behalf of a squad. Do not present a button that the API rejects.
   const canStart = t.status === 'TODO' && (t.assignedToId === S.user.id || isPM() || isCPO() || isCTO() || isCEO());
   const canFlag = t.status === 'IN_PROGRESS' && t.assignedToId === S.user.id;
-  const canPm = t.status === 'FLAGGED_COMPLETE' && (isPM() || isCPO() || isCTO());
-  const canCto = t.status === 'PM_VERIFIED' && isCTO();
-  const canClose = t.status === 'CTO_VERIFIED' && (isPM() || isCTO());
+  const canPm = t.status === 'FLAGGED_COMPLETE' && (isPM() || isCEO());
+  const canCto = t.status === 'PM_VERIFIED' && (isCTO() || isCEO());
+  const canClose = t.status === 'CTO_VERIFIED' && (isPM() || isCTO() || isCEO());
 
   const isCompleted = ['CTO_VERIFIED', 'CLOSED'].includes(t.status);
   const isOv = t.isOverdue || (t.dueDate && !isCompleted && new Date(t.dueDate) < new Date());
