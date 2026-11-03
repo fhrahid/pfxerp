@@ -77,7 +77,7 @@ export class PayrollController {
 
   /** API-CHRO-02. */
   @Post('payroll/:id/approve')
-  @Roles(UserRole.PM, UserRole.CEO)
+  @Roles(UserRole.CPO, UserRole.CEO)
   approve(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.payroll.approveAndDisburse(user, id);
   }

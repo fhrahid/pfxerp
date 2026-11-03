@@ -1861,7 +1861,7 @@ async function viewPayroll() {
     <div class="list-item"><div class="top">
       <div><b>${esc(p.squad?.name || '')}</b> · Lab ${p.labNumber} · ${money(p.totalProposed)}</div>
       <div class="row">${statusBadge(p.status)}
-        ${(isCEO() || (isPM() && mySquads().some((s) => s.id === p.squadId))) && p.status === 'SUBMITTED' ? `<button class="btn good sm" onclick="act('POST','/payroll/${p.id}/approve',null,true)">${isPM() ? 'Disburse salary' : 'CEO override: disburse'}</button>` : ''}
+        ${(isCPO() || isCEO()) && p.status === 'SUBMITTED' ? `<button class="btn good sm" onclick="act('POST','/payroll/${p.id}/approve',null,true)">${isCEO() ? 'CEO override: approve & disburse' : 'Approve & disburse'}</button>` : ''}
         ${isCPO() && p.status === 'SUBMITTED' ? `<button class="btn bad sm" onclick="uiPayrollReject('${p.id}')">Reject</button>` : ''}
       </div></div>
       <div class="itemlist">${p.lineItems.map((li) => `<div class="muted" style="font-size:12.5px">${esc(li.user?.fullName || li.userId)} — ${esc(li.tier)} · ${money(li.amount)} <i>${esc(li.justification || '')}</i></div>`).join('')}</div>

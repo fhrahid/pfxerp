@@ -182,28 +182,25 @@ export function Shell({ children }: { children: React.ReactNode }) {
     .toUpperCase();
 
   const userFooter = (
-    <div className="border-t p-3">
-      <div className="flex items-center gap-2.5">
-        <Avatar>
+    <div className="shrink-0 border-t p-2">
+      <div className="flex items-center gap-2">
+        <Avatar className="h-8 w-8">
           <AvatarFallback>{initials}</AvatarFallback>
         </Avatar>
         <div className="min-w-0 flex-1 leading-tight">
-          <div className="truncate text-sm font-semibold">{me.data?.fullName}</div>
-          <div className="text-[11px] font-medium text-primary">{role}</div>
-          <div className="text-xs font-bold text-emerald-700">{taka(me.data?.walletBalance)}</div>
+          <div className="truncate text-xs font-semibold">{me.data?.fullName}</div>
+          <div className="flex items-center gap-2 text-[10px]"><span className="font-medium text-primary">{role}</span><span className="font-bold text-emerald-700">{taka(me.data?.walletBalance)}</span></div>
         </div>
       </div>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="mt-2 w-full justify-start text-muted-foreground"
-        onClick={async () => {
-          await logout();
-          router.push("/");
-        }}
-      >
-        <LogOut className="h-4 w-4" /> Log out
-      </Button>
+      <div className="mt-2 grid grid-cols-3 gap-1">
+        <Link href="/profile" onClick={() => setMobileOpen(false)} className="flex min-h-8 items-center justify-center rounded-md border px-1 text-[10px] font-medium hover:bg-muted">Profile</Link>
+        <Button variant="outline" size="sm" className="h-8 px-1 text-[10px]" onClick={toggleTheme} aria-label={lightMode ? "White mode enabled. Switch to dark mode" : "Dark mode enabled. Switch to white mode"}>
+          {lightMode ? <Sun className="mr-1 h-3 w-3" /> : <Moon className="mr-1 h-3 w-3" />}{lightMode ? "White" : "Dark"}
+        </Button>
+        <Button variant="ghost" size="sm" className="h-8 px-1 text-[10px] text-muted-foreground" onClick={async () => { await logout(); router.push("/"); }}>
+          <LogOut className="mr-1 h-3 w-3" /> Log out
+        </Button>
+      </div>
     </div>
   );
 
@@ -280,19 +277,19 @@ export function Shell({ children }: { children: React.ReactNode }) {
       </aside>
 
       {/* Desktop Sidebar */}
-      <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r bg-card md:flex">
-        <div className="flex h-16 items-center gap-2.5 border-b px-5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-lg font-extrabold text-primary-foreground">
+      <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col border-r bg-card md:flex">
+        <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-base font-extrabold text-primary-foreground">
             P
           </div>
           <div className="leading-tight">
-            <div className="text-sm font-bold tracking-wide">
+              <div className="text-xs font-bold tracking-wide">
               POINTFEX <span className="text-primary">ERP</span>
             </div>
-            <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Venture Studio</div>
+              <div className="text-[9px] uppercase tracking-widest text-muted-foreground">Venture Studio</div>
           </div>
         </div>
-        <nav className="flex-1 space-y-0.5 overflow-y-auto p-2 thin-scroll">
+        <nav aria-label="Primary navigation" className="min-h-0 flex-1 space-y-0 overflow-hidden p-1.5">
           {items.map((item) => {
             const active = pathname.startsWith(item.href);
             const Icon = item.icon;
@@ -301,12 +298,12 @@ export function Shell({ children }: { children: React.ReactNode }) {
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                  "flex h-6 items-center gap-2 rounded-md px-2 text-[11px] font-medium leading-none transition-colors",
                   active ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground",
                 )}
                 aria-current={active ? "page" : undefined}
               >
-                <Icon className="h-4 w-4" />
+                <Icon className="h-3.5 w-3.5 shrink-0" />
                 {item.label}
               </Link>
             );
@@ -334,8 +331,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
             <PageTitle pathname={pathname} />
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <Button variant="ghost" size="icon" onClick={toggleTheme} aria-label={lightMode ? "Switch to dark mode" : "Switch to light mode"} title={lightMode ? "Dark mode" : "Light mode"}>
-              {lightMode ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+            <Button variant="outline" size="sm" onClick={toggleTheme} aria-label={lightMode ? "White mode enabled. Switch to dark mode" : "Dark mode enabled. Switch to white mode"} title={lightMode ? "Switch to dark mode" : "Switch to white mode"} className="gap-1.5 px-2 text-xs">
+              {lightMode ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+              <span className="hidden sm:inline">{lightMode ? "White mode" : "Dark mode"}</span>
             </Button>
             {ROLES.isExec(role) ? (
               <FormDialog

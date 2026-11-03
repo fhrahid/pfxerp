@@ -32,6 +32,7 @@ export default function PayrollPage() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
+        {ROLES.isPM(role) ? <p className="w-full text-xs text-muted-foreground">PMs submit salary proposals for CPO review and disbursement.</p> : null}
         {isChro
           ? ["SUBMITTED", "APPROVED", "REJECTED"].map((s) => (
               <Button key={s} size="sm" variant={status === s ? "default" : "outline"} onClick={() => setStatus(s)}>
@@ -68,18 +69,18 @@ export default function PayrollPage() {
                 </CardTitle>
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant={statusVariant(p.status)}>{p.status}</Badge>
-                  {(ROLES.isCEO(role) || (ROLES.isPM(role) && (me.data?.squadMemberships || []).some((m: any) => m.squad.id === p.squadId && m.role === "PM"))) && p.status === "SUBMITTED" ? (
+                  {(ROLES.isCPO(role) || ROLES.isCEO(role)) && p.status === "SUBMITTED" ? (
                     <>
-                      <Button size="sm" variant="success" onClick={() => action("POST", `/payroll/${p.id}/approve`, undefined, true, ROLES.isPM(role) ? "Salary disbursed" : "Approved & disbursed")}>
-                        {ROLES.isPM(role) ? "Disburse salary" : "CEO override: disburse"}
+                      <Button size="sm" variant="success" onClick={() => action("POST", `/payroll/${p.id}/approve`, undefined, true, "Salary approved & disbursed")}>
+                        {ROLES.isCEO(role) ? "CEO override: approve & disburse" : "Approve & disburse"}
                       </Button>
-                      {isChro ? <FormDialog
+                      <FormDialog
                         trigger={<Button size="sm" variant="destructive">Reject</Button>}
                         title="Reject payroll proposal"
                         fields={[{ name: "reason", label: "Reason", type: "textarea", required: true }]}
                         submitLabel="Reject"
                         onSubmit={(d) => api("POST", `/payroll/${p.id}/reject`, d)}
-                      /> : null}
+                      />
                     </>
                   ) : null}
                 </div>
@@ -149,7 +150,8 @@ function CreateProposalButton({ squadOptions }: { squadOptions: { value: string;
       {open ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 sm:p-4" onClick={(e) => e.target === e.currentTarget && setOpen(false)}>
           <div className="max-h-[88vh] w-full max-w-lg overflow-y-auto rounded-xl border bg-background p-4 sm:p-6 shadow-xl thin-scroll">
-            <h3 className="text-lg font-bold">Distribute lab payroll (budget ৳10,000)</h3>
+            <h3 className="text-lg font-bold">Propose lab payroll (budget ৳10,000)</h3>
+            <p className="mt-1 text-xs text-muted-foreground">The CPO reviews and disburses approved salaries.</p>
             <div className="mt-1 text-xs text-muted-foreground">Lab number</div>
             <input
               type="number"

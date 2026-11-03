@@ -111,11 +111,8 @@ export class PayrollService {
     // otherwise a PM could probe/replay another squad's completed payroll.
     const scopeProposal = await this.prisma.payrollProposal.findUnique({ where: { id: proposalId }, select: { squadId: true } });
     if (!scopeProposal) throw new NotFoundException('Proposal not found');
-    if (approver.role === UserRole.PM) {
-      const membership = await this.prisma.squadMembership.findFirst({ where: { userId: approver.id, squadId: scopeProposal.squadId, role: 'PM', leftAt: null } });
-      if (!membership) throw new ForbiddenException('Only this squad\'s PM may disburse from its treasury');
-    } else if (approver.role !== UserRole.CEO) {
-      throw new ForbiddenException('Only the squad PM or CEO may disburse payroll');
+    if (approver.role !== UserRole.CPO && approver.role !== UserRole.CEO) {
+      throw new ForbiddenException('Payroll disbursement requires CPO approval (CEO may override)');
     }
 
     // Idempotent replay: if this exact key already settled the ledger, return the original outcome
@@ -149,13 +146,8 @@ export class PayrollService {
       });
       if (!proposal) throw new NotFoundException('Proposal not found');
       if (!proposal.squad.account) throw new BadRequestException('Squad treasury account missing');
-      if (approver.role === UserRole.PM) {
-        const membership = await tx.squadMembership.findFirst({
-          where: { userId: approver.id, squadId: proposal.squadId, role: 'PM', leftAt: null },
-        });
-        if (!membership) throw new ForbiddenException('Only this squad\'s PM may disburse from its treasury');
-      } else if (approver.role !== UserRole.CEO) {
-        throw new ForbiddenException('Only the squad PM or CEO may disburse payroll');
+      if (approver.role !== UserRole.CPO && approver.role !== UserRole.CEO) {
+        throw new ForbiddenException('Payroll disbursement requires CPO approval (CEO may override)');
       }
 
       const paidItems = proposal.lineItems.filter((i) => Number(i.amount) > 0);
