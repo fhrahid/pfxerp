@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { PayrollTier, UserRole } from '@prisma/client';
+import { FineTargetType, PayrollTier, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { SettingsService } from '../settings/settings.service';
@@ -27,6 +27,100 @@ export class PayrollService {
     private readonly settings: SettingsService,
     private readonly events: EventsGateway,
   ) {}
+
+  async proposeFine(actor: AuthUser, dto: { targetType: FineTargetType; targetSquadId?: string; targetUserId?: string; amount: number; reason: string }) {
+    if (!( [UserRole.CPO, UserRole.CTO, UserRole.CEO] as string[]).includes(actor.role)) throw new ForbiddenException('Only CPO, CTO or CEO may propose a fine');
+    if (!Number.isFinite(dto.amount) || dto.amount <= 0 || dto.amount > 50000 || Math.abs(dto.amount * 100 - Math.round(dto.amount * 100)) > 1e-7) {
+      throw new BadRequestException('Fine amount must be between BDT 0.01 and 50,000.00 with at most two decimals');
+    }
+    if (!dto.reason?.trim() || dto.reason.trim().length < 10) throw new BadRequestException('Provide a reason of at least 10 characters');
+
+    let targetSquadId: string | null = null;
+    let targetUserId: string | null = null;
+    if (dto.targetType === FineTargetType.SQUAD) {
+      if (!dto.targetSquadId || dto.targetUserId) throw new BadRequestException('Select exactly one squad target');
+      const squad = await this.prisma.squad.findUnique({ where: { id: dto.targetSquadId } });
+      if (!squad || !squad.isActive) throw new BadRequestException('Active squad not found');
+      await this.ledger.squadTreasury(squad.id);
+      targetSquadId = squad.id;
+    } else {
+      if (!dto.targetUserId || dto.targetSquadId) throw new BadRequestException('Select exactly one person target');
+      const target = await this.prisma.user.findUnique({ where: { id: dto.targetUserId } });
+      if (!target || !target.isActive || !([UserRole.PM, UserRole.DEVELOPER] as string[]).includes(target.role)) {
+        throw new BadRequestException('Target must be an active PM or developer');
+      }
+      await this.ledger.personalWallet(target.id);
+      targetUserId = target.id;
+    }
+
+    const proposal = await this.prisma.fineProposal.create({
+      data: {
+        targetType: dto.targetType, targetSquadId, targetUserId,
+        proposedById: actor.id, amount: dto.amount, reason: dto.reason.trim(),
+      },
+      include: {
+        targetSquad: { select: { id: true, name: true } },
+        targetUser: { select: { id: true, fullName: true, role: true } },
+      },
+    });
+    await this.prisma.executiveAuditLog.create({
+      data: {
+        executiveId: actor.id, executiveRole: actor.role as UserRole,
+        actionType: 'FINE_PROPOSED', riskSeverity: 'WARNING',
+        payloadSnapshot: { fineProposalId: proposal.id, targetType: proposal.targetType, targetSquadId, targetUserId, amount: dto.amount, reason: dto.reason.trim() },
+      },
+    });
+    return proposal;
+  }
+
+  async listFineProposals(actor: AuthUser) {
+    if (!([UserRole.CFO, UserRole.CPO, UserRole.CTO, UserRole.CEO] as string[]).includes(actor.role)) throw new ForbiddenException();
+    return this.prisma.fineProposal.findMany({
+      where: actor.role === UserRole.CFO || actor.role === UserRole.CEO ? {} : { proposedById: actor.id },
+      orderBy: { createdAt: 'desc' }, take: 200,
+      include: {
+        targetSquad: { select: { id: true, name: true } },
+        targetUser: { select: { id: true, fullName: true, role: true } },
+        proposedBy: { select: { id: true, fullName: true, role: true } },
+        approvedBy: { select: { id: true, fullName: true, role: true } },
+      },
+    });
+  }
+
+  async approveFine(cfo: AuthUser, proposalId: string) {
+    if (cfo.role !== UserRole.CFO) throw new ForbiddenException('Only the CFO may approve proposed fines');
+    const result = await this.prisma.$transaction(async (tx) => {
+      const proposal = await tx.fineProposal.findUnique({ where: { id: proposalId } });
+      if (!proposal) throw new NotFoundException('Fine proposal not found');
+      if (proposal.status !== 'PENDING') throw new AppException('CONFLICT', `Fine proposal is ${proposal.status}`);
+      const target = proposal.targetType === FineTargetType.SQUAD
+        ? await tx.account.findUnique({ where: { squadId: proposal.targetSquadId! } })
+        : await tx.account.findUnique({ where: { ownerId: proposal.targetUserId! } });
+      if (!target) throw new BadRequestException('Target wallet is not provisioned');
+      const reserve = await this.ledger.systemReserve(tx);
+      const claim = await tx.fineProposal.updateMany({ where: { id: proposalId, status: 'PENDING' }, data: { status: 'APPROVED', approvedById: cfo.id, approvedAt: new Date() } });
+      if (!claim.count) throw new AppException('CONFLICT', 'Fine proposal was already processed');
+      const transaction = await this.ledger.postTransaction({
+        entries: [
+          { accountId: target.id, direction: 'DEBIT', amount: Number(proposal.amount) },
+          { accountId: reserve.id, direction: 'CREDIT', amount: Number(proposal.amount) },
+        ],
+        referenceType: 'FINE', referenceId: proposal.id,
+        description: `CFO-approved fine: ${proposal.reason}`,
+        idempotencyKey: `fine_proposal_${proposal.id}`, authorizedById: cfo.id,
+      }, tx);
+      await tx.fineProposal.update({ where: { id: proposal.id }, data: { ledgerTransactionId: transaction.id } });
+      await tx.executiveAuditLog.create({
+        data: {
+          executiveId: cfo.id, executiveRole: UserRole.CFO, actionType: 'FINE_APPROVED', riskSeverity: 'WARNING',
+          payloadSnapshot: { fineProposalId: proposal.id, targetType: proposal.targetType, targetSquadId: proposal.targetSquadId, targetUserId: proposal.targetUserId, amount: Number(proposal.amount), transactionId: transaction.id },
+        },
+      });
+      return { transaction, targetId: target.id, reserveId: reserve.id, amount: Number(proposal.amount) };
+    });
+    await this.ledger.publishBalanceUpdates([result.targetId, result.reserveId]);
+    return { success: true, proposalId, transactionId: result.transaction.id, amount: result.amount };
+  }
 
   async submitProposal(user: AuthUser, dto: { squadId: string; labNumber: number; sprintNumber?: number; lineItems: { userId: string; tier: PayrollTier; amount: number; justification?: string }[] }) {
     // Only the squad PM proposes payroll

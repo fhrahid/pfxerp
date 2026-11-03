@@ -94,6 +94,16 @@ enum PayrollTier {
   SLACKER
 }
 
+enum FineTargetType {
+  SQUAD
+  USER
+}
+
+enum FineProposalStatus {
+  PENDING
+  APPROVED
+}
+
 enum LoanStatus {
   ACTIVE
   REPAID
@@ -274,6 +284,9 @@ model User {
   sentInvitations         Invitation[]               @relation("InvitationSender")
   passwordResets          PasswordReset[]            @relation("UserPasswordResets")
   productionResets        ProductionResetLog[]         @relation("ProductionResetActor")
+  finesProposed           FineProposal[]               @relation("FineProposer")
+  finesApproved           FineProposal[]               @relation("FineApprover")
+  finesTargeted           FineProposal[]               @relation("FineTargetUser")
 }
 
 model Squad {
@@ -305,6 +318,7 @@ model Squad {
   healthSnapshots         SquadHealthSnapshot[]
   sprintPayoutItems       SprintPayoutItem[]
   repositories            SquadRepository[]
+  fineProposals           FineProposal[]
 }
 
 // v1.1: multiple GitHub repositories per squad (PM/C-level managed)
@@ -1043,4 +1057,28 @@ model ProductionResetLog {
   resetBy     User     @relation("ProductionResetActor", fields: [resetById], references: [id], onDelete: Restrict)
   summary     Json
   createdAt   DateTime @default(now())
+}
+
+model FineProposal {
+  id                  String             @id @default(uuid())
+  targetType          FineTargetType
+  targetSquadId       String?
+  targetUserId        String?
+  proposedById        String
+  approvedById        String?
+  amount              Decimal            @db.Decimal(14, 2)
+  reason              String             @db.Text
+  status              FineProposalStatus @default(PENDING)
+  ledgerTransactionId String?
+  createdAt           DateTime           @default(now())
+  approvedAt          DateTime?
+
+  targetSquad Squad? @relation(fields: [targetSquadId], references: [id], onDelete: Restrict)
+  targetUser  User?  @relation("FineTargetUser", fields: [targetUserId], references: [id], onDelete: Restrict)
+  proposedBy  User   @relation("FineProposer", fields: [proposedById], references: [id], onDelete: Restrict)
+  approvedBy  User?  @relation("FineApprover", fields: [approvedById], references: [id], onDelete: Restrict)
+
+  @@index([status, createdAt])
+  @@index([targetSquadId])
+  @@index([targetUserId])
 }

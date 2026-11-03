@@ -365,6 +365,7 @@ const TABS = [
   { id: 'roster', label: 'People', show: () => canManage() || isExec() },
   { id: 'invitations', label: 'Invitations', show: () => isExec() },
   { id: 'payroll', label: 'Payroll', show: () => isPM() || isCPO() || isCEO() },
+  { id: 'fines', label: 'Fine Proposals', show: () => isCFO() || isCPO() || isCTO() || isCEO() },
   { id: 'finance', label: 'Finance', show: () => isExec() || isPM() },
   { id: 'accounting', label: 'Accounting', show: () => true },
   { id: 'profile', label: 'My Profile', show: () => true },
@@ -387,6 +388,7 @@ const TAB_TITLES = {
   roster: ['People', 'Create profiles, change roles, reset passwords'],
   invitations: ['Developer Invitations', 'Send 72-hour developer invitation links via Resend and manage token validity'],
   payroll: ['Weekly Lab Payroll', 'PM proposes ≤ ৳10,000 · CHRO audits & disburses'],
+  fines: ['Fine Proposals', 'CPO / CTO propose · CFO approves · ledgered debit'],
   finance: ['Finance', 'Sprint pool ৳150,000 · 5% tax · loans · equity'],
   accounting: ['Accounting', 'Double-entry cashflow · role-scoped accounts'],
   profile: ['My Profile', 'Your wallet, work history, activity and password'],
@@ -491,7 +493,7 @@ async function render() {
   const views = {
     overview: viewOverview, kanban: viewKanban, squads: viewSquads, roster: viewRoster,
     invitations: viewInvitations,
-    payroll: viewPayroll, finance: viewFinance, accounting: viewAccounting, profile: viewProfile, governance: viewGovernance,
+    payroll: viewPayroll, fines: viewFines, finance: viewFinance, accounting: viewAccounting, profile: viewProfile, governance: viewGovernance,
     marketplace: viewMarketplace, consultancy: viewConsultancy, quality: viewQuality,
     bounty: viewBounty, clients: viewClients, notices: viewNotices, chaos: viewChaos,
     leaderboard: viewLeaderboard, audit: viewAudit, settings: viewSettings,
@@ -1927,6 +1929,41 @@ async function uiRevokeInvitation(id) {
 
 /* ------------------------------ Payroll ------------------------------ */
 const TIER_CAPS = { STAR_PERFORMER: 3500, REGULAR: 2000, UNDERPERFORMER: 1000, SLACKER: 0 };
+
+async function viewFines() {
+  const proposals = await api('GET', '/fines/proposals');
+  const canPropose = isCPO() || isCTO() || isCEO();
+  tabActions(canPropose ? '<button class="btn primary" onclick="uiFinePropose()">+ Propose a fine</button>' : '');
+  C().innerHTML = `<div class="panel"><h3>Fine proposals · CFO approval required</h3>
+    ${proposals.length ? `<table><tr><th>Target</th><th>Amount</th><th>Reason</th><th>Proposed by</th><th>Status</th><th>Actions</th></tr>
+      ${proposals.map((p) => {
+        const target = p.targetType === 'SQUAD' ? p.targetSquad?.name : `${p.targetUser?.fullName || 'User'} (${p.targetUser?.role || ''})`;
+        return `<tr><td><b>${esc(target || '—')}</b><div class="muted">${esc(p.targetType)}</div></td><td class="money">${money(p.amount)}</td><td>${esc(p.reason)}</td><td>${esc(p.proposedBy?.fullName || '—')} (${esc(p.proposedBy?.role || '—')})</td><td>${statusBadge(p.status)}</td><td>${isCFO() && p.status === 'PENDING' ? `<button class="btn sm bad" onclick="act('POST','/fines/proposals/${p.id}/approve')">Approve & apply</button>` : (p.status === 'PENDING' ? 'Awaiting CFO' : '—')}</td></tr>`;
+      }).join('')}</table>` : '<div class="empty">No fine proposals</div>'}
+    <div class="muted" style="font-size:11px;margin-top:8px">Approved fines debit the selected user wallet or squad treasury and credit SYSTEM_RESERVE in the same ledger transaction. Limit ৳50,000 per proposal.</div>
+  </div>`;
+}
+
+async function uiFinePropose() {
+  let users = [];
+  try { users = await api('GET', '/users'); } catch (_) {}
+  const targets = [
+    ...S.squads.filter((s) => s.isActive !== false).map((s) => ({ value: `SQUAD:${s.id}`, label: `Squad · ${s.name}` })),
+    ...users.filter((u) => u.isActive !== false && ['PM', 'DEVELOPER'].includes(u.role)).map((u) => ({ value: `USER:${u.id}`, label: `Person · ${u.fullName} (${u.role})` })),
+  ];
+  formModal('Propose a fine (CFO approval required)', [
+    { name: 'target', label: 'Squad, PM or developer', type: 'select', required: true, options: targets },
+    { name: 'amount', label: 'Amount (BDT, max 50,000)', type: 'number', required: true, min: 0.01, max: 50000, step: '0.01' },
+    { name: 'reason', label: 'Evidence / reason (min 10 characters)', type: 'textarea', required: true },
+  ], 'Submit for CFO approval', (d) => {
+    const [targetType, targetId] = String(d.target || '').split(':');
+    if (!targetId || !['SQUAD', 'USER'].includes(targetType)) throw new Error('Select a valid target');
+    return act('POST', '/fines/proposals', {
+      targetType, ...(targetType === 'SQUAD' ? { targetSquadId: targetId } : { targetUserId: targetId }),
+      amount: Number(d.amount), reason: d.reason,
+    });
+  });
+}
 
 async function viewPayroll() {
   const status = S.payrollStatus || 'SUBMITTED';

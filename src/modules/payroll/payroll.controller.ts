@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Headers, Param, Post, Query } from '@nestjs/common';
-import { IsArray, IsEnum, IsInt, IsOptional, IsString, IsUUID, Min, MinLength, ValidateNested } from 'class-validator';
+import { IsArray, IsEnum, IsInt, IsNumber, IsOptional, IsString, IsUUID, Max, Min, MinLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
-import { PayrollTier, UserRole } from '@prisma/client';
+import { FineTargetType, PayrollTier, UserRole } from '@prisma/client';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Roles, CurrentUser } from '../../common/decorators';
 import { AuthUser } from '../../common/types';
@@ -57,6 +57,28 @@ class SlackerFineDto {
   evidenceUrl?: string;
 }
 
+class ProposeFineDto {
+  @IsEnum(FineTargetType)
+  targetType: FineTargetType;
+
+  @IsOptional()
+  @IsUUID()
+  targetSquadId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  targetUserId?: string;
+
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
+  @Max(50000)
+  amount: number;
+
+  @IsString()
+  @MinLength(10)
+  reason: string;
+}
+
 @ApiTags('payroll')
 @ApiBearerAuth()
 @Controller()
@@ -93,5 +115,23 @@ export class PayrollController {
   @Roles(UserRole.CPO)
   slacker(@Body() dto: SlackerFineDto, @CurrentUser() user: AuthUser, @Headers('x-idempotency-key') idem?: string) {
     return this.payroll.issueSlackerFine(user.id, dto, idem || '');
+  }
+
+  @Post('fines/proposals')
+  @Roles(UserRole.CPO, UserRole.CTO, UserRole.CEO)
+  proposeFine(@Body() dto: ProposeFineDto, @CurrentUser() user: AuthUser) {
+    return this.payroll.proposeFine(user, dto);
+  }
+
+  @Get('fines/proposals')
+  @Roles(UserRole.CFO, UserRole.CPO, UserRole.CTO, UserRole.CEO)
+  listFineProposals(@CurrentUser() user: AuthUser) {
+    return this.payroll.listFineProposals(user);
+  }
+
+  @Post('fines/proposals/:id/approve')
+  @Roles(UserRole.CFO)
+  approveFine(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.payroll.approveFine(user, id);
   }
 }
