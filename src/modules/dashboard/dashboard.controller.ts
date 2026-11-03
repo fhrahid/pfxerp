@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Post } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Roles, CurrentUser } from '../../common/decorators';
@@ -34,6 +34,12 @@ export class DashboardController {
   @Roles(UserRole.CFO, UserRole.CEO)
   cfo() {
     return this.dashboard.cfoDashboard();
+  }
+
+  @Post('dashboard/cfo/recalculate-valuations')
+  @Roles(UserRole.CFO, UserRole.CEO)
+  recalculateValuations(@CurrentUser() user: AuthUser) {
+    return this.dashboard.recalculateSquadValuations(user);
   }
 
   @Get('dashboard/me')

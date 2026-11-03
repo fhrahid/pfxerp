@@ -18,6 +18,9 @@ async function get(token, path) {
   if (!response.ok) throw new Error(`${path}: ${response.status}`);
   return json.data;
 }
+async function post(token, path) {
+  return fetch(`${BASE}${path}`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } });
+}
 async function denied(token, path, method = 'POST') {
   const response = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } });
   assert(response.status === 403, `${method} ${path} should be 403, got ${response.status}`);
@@ -33,6 +36,8 @@ const [ceoAccounts, cfoAccounts, pmAccounts, devAccounts] = await Promise.all([
 const cfoOverview = await get(cfo, '/dashboard/cfo');
 assert(Number.isFinite(cfoOverview.cashInCirculation), 'CFO overview exposes cash in circulation');
 assert(Number.isFinite(cfoOverview.outstandingLoanPrincipal) && Number.isFinite(cfoOverview.totalInvested), 'CFO overview exposes loan and investment totals');
+const recalc = await post(cfo, '/dashboard/cfo/recalculate-valuations');
+assert(recalc.ok && Number((await recalc.json()).data.recalculated) >= 0, 'CFO can explicitly recalculate all active squad valuations');
 assert(ceoAccounts.some((a) => a.type === 'SYSTEM_RESERVE'), 'CEO sees the system reserve');
 assert(cfoAccounts.some((a) => a.type === 'SYSTEM_RESERVE'), 'CFO sees the system reserve');
 assert(!pmAccounts.some((a) => a.type === 'SYSTEM_RESERVE'), 'PM cannot see the system reserve');

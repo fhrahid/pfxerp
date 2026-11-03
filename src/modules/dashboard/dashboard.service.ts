@@ -1,5 +1,5 @@
-import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { ForbiddenException, Injectable } from '@nestjs/common';
+import { Prisma, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { EventsGateway } from '../../events/events.gateway';
@@ -447,6 +447,23 @@ export class DashboardService {
       activeInvestmentCount: stakes.length,
       totalInvested: stakes.reduce((sum, s) => sum + Number(s.investedAmount), 0),
     };
+  }
+
+  async recalculateSquadValuations(actor: { id: string; role: string }) {
+    if (actor.role !== UserRole.CFO && actor.role !== UserRole.CEO) {
+      throw new ForbiddenException('Only the CFO or CEO may recalculate squad valuations');
+    }
+    const squads = await this.refreshSquadMetrics();
+    await this.prisma.executiveAuditLog.create({
+      data: {
+        executiveId: actor.id,
+        executiveRole: actor.role as UserRole,
+        actionType: 'RECALCULATE_SQUAD_VALUATIONS',
+        riskSeverity: 'INFO',
+        payloadSnapshot: { activeSquadCount: squads.length, squads: squads.map((s) => ({ id: s.id, name: s.name, valuation: s.valuation })) },
+      },
+    });
+    return { recalculated: squads.length, squads: squads.map((s) => ({ id: s.id, name: s.name, valuation: s.valuation, health: s.health })) };
   }
 
   async meDashboard(user: { id: string; role: string; squadIds: string[] }) {

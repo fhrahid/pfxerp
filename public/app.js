@@ -508,6 +508,7 @@ async function viewOverview() {
   if (isExec()) {
     tabActions(`
       <button class="btn primary" onclick="uiInviteDeveloper()">+ Send Invitation Link</button>
+      ${(isCFO() || isCEO()) ? '<button class="btn" onclick="uiRecalculateSquadValuations()">Recalculate squad valuations</button>' : ''}
       ${isCEO() ? '<button class="btn ghost" onclick="uiCreateRole()">+ New Role</button>' : ''}
     `);
   } else {
@@ -1180,6 +1181,15 @@ function uiSquadCreate() {  formModal('Create squad — treasury starts empty', 
     { name: 'name', label: 'Squad name', required: true, placeholder: 'Squad 7' },
     { name: 'description', label: 'Description', placeholder: 'Product engineering squad' },
   ], 'Create squad', (d) => act('POST', '/squads', d));
+}
+
+async function uiRecalculateSquadValuations() {
+  if (!confirm('Recalculate active squad valuations using current treasury, revenue, debt and usage metrics? This updates valuation snapshots; it does not move money.')) return;
+  try {
+    const result = await api('POST', '/dashboard/cfo/recalculate-valuations');
+    toast(`Recalculated valuations for ${result.recalculated} squads`);
+    await viewOverview();
+  } catch (e) { toast(e.message || 'Valuation recalculation failed', false); }
 }
 
 function uiSquadEdit(id, name, description, isActive) {
