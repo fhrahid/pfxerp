@@ -2,6 +2,7 @@
    loads app.js as a browser would, then walks login -> every tab -> key interactions. */
 const fs = require('fs');
 const vm = require('vm');
+const nodeCrypto = require('crypto');
 
 const code = fs.readFileSync('public/app.js', 'utf8');
 
@@ -94,6 +95,8 @@ const responses = {
 };
 
 let fetchLog = [];
+const noticePublicKeys = new Map();
+let mockKeyRegistrationUserId = 'u-ceo';
 async function fetchStub(url, opts = {}) {
   const method = opts.method || 'GET';
   const path = url.replace('/api/v1', '');
@@ -101,6 +104,14 @@ async function fetchStub(url, opts = {}) {
   fetchLog.push(key);
   if (method === 'POST' && path === '/auth/login') {
     return jsonRes({ data: { accessToken: 'tok', refreshToken: 'ref', user: ceoUser } });
+  }
+  if (method === 'GET' && path.startsWith('/notices/keys/')) {
+    const userId = path.split('/').pop();
+    return jsonRes({ data: { id: userId, publicKey: noticePublicKeys.has(userId) ? JSON.stringify(noticePublicKeys.get(userId)) : null } });
+  }
+  if (method === 'POST' && path === '/notices/keys/register') {
+    noticePublicKeys.set(mockKeyRegistrationUserId, JSON.parse(JSON.parse(opts.body).publicKey));
+    return jsonRes({ data: { registered: true } });
   }
   const hit = responses[key] ?? responses['GET ' + path.split('?')[0] + (path.includes('?') ? path.slice(path.indexOf('?')) : '')];
   if (hit !== undefined) return jsonRes({ data: hit });
@@ -120,7 +131,11 @@ const sandbox = {
   localStorage: { getItem: (k) => (storage.has(k) ? storage.get(k) : null), setItem: (k, v) => storage.set(k, v), removeItem: (k) => storage.delete(k) },
   fetch: fetchStub,
   URLSearchParams,
-  crypto: { randomUUID: () => 'uuid-' + Math.random() },
+  crypto: { subtle: nodeCrypto.webcrypto.subtle, getRandomValues: nodeCrypto.webcrypto.getRandomValues.bind(nodeCrypto.webcrypto), randomUUID: () => 'uuid-' + Math.random() },
+  TextEncoder,
+  TextDecoder,
+  Uint8Array,
+  ArrayBuffer,
   FormData: class { constructor(f) { this._f = f; } get(n) { const el = this._f?.elements?.[n]; return el ? el.value : ''; } entries() { return [][Symbol.iterator](); } },
   setTimeout, clearTimeout,
   btoa: (s) => Buffer.from(s, 'binary').toString('base64'),
@@ -168,6 +183,25 @@ function check(name, cond) {
       check('tab ' + t + ' rendered', false);
       console.log('      error: ' + e.message);
     }
+  }
+
+  console.log('--- notice encryption flow ---');
+  try {
+    mockKeyRegistrationUserId = 'u2';
+    const recipientKeys = await vm.runInContext("ensureNoticeKeys('u2')", sandbox);
+    sandbox.__recipientNoticeBundle = JSON.stringify(recipientKeys.publicKey);
+    const ciphertext = await vm.runInContext("encryptNoticeForRecipient('E2EE smoke test', __recipientNoticeBundle)", sandbox);
+    const plaintext = await vm.runInContext(`decryptNoticeForUser('u2', ${JSON.stringify(ciphertext)})`, sandbox);
+    const message = JSON.stringify(['u2', 'Smoke notice', 'ORGANIZATIONAL', ciphertext]);
+    const signature = await vm.runInContext(`signNoticeMessage('u-ceo', ${JSON.stringify(message)})`, sandbox);
+    const envelope = JSON.parse(Buffer.from(ciphertext, 'base64').toString('utf8'));
+    const ephemeral = nodeCrypto.createPublicKey({ key: Buffer.from(envelope.ephemPk, 'base64'), format: 'der', type: 'spki' });
+    const signingKey = nodeCrypto.createPublicKey({ key: Buffer.from(noticePublicKeys.get('u-ceo').ed25519, 'base64'), format: 'der', type: 'spki' });
+    const signatureValid = nodeCrypto.verify(null, Buffer.from(message), signingKey, Buffer.from(signature, 'base64'));
+    check('notice E2EE creates valid X25519/AES-GCM envelope and Ed25519 signature', plaintext === 'E2EE smoke test' && envelope.alg === 'X25519-AES256GCM' && ephemeral.asymmetricKeyType === 'x25519' && Buffer.from(envelope.iv, 'base64').length === 12 && Buffer.from(envelope.data, 'base64').length >= 16 && signatureValid);
+  } catch (e) {
+    check('notice E2EE crypto envelope and signature', false);
+    console.log('      error: ' + e.message);
   }
 
   console.log('--- modal flows ---');

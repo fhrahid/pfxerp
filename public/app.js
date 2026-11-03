@@ -2494,17 +2494,105 @@ function uiAssign(milestoneId) {
 }
 
 /* ------------------------------ Notices ------------------------------ */
+const noticeKeyStorage = (userId) => `pointfex-notice-keys:${userId}`;
+const bytesToB64 = (bytes) => {
+  const array = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  let binary = '';
+  for (let i = 0; i < array.length; i++) binary += String.fromCharCode(array[i]);
+  return btoa(binary);
+};
+const b64ToBytes = (value) => Uint8Array.from(atob(value), (ch) => ch.charCodeAt(0));
+
+async function ensureNoticeKeys(userId) {
+  if (!globalThis.crypto?.subtle) throw new Error('Secure notice encryption is unavailable in this browser. Use a current HTTPS browser.');
+  const storageKey = noticeKeyStorage(userId);
+  const cached = localStorage.getItem(storageKey);
+  if (cached) {
+    const keys = JSON.parse(cached);
+    const current = await api('GET', `/notices/keys/${userId}`);
+    if (current.publicKey !== JSON.stringify(keys.publicKey)) throw new Error('Notice keys on this browser do not match the server key. Use the browser where you first registered notice keys.');
+    return keys;
+  }
+
+  const current = await api('GET', `/notices/keys/${userId}`);
+  if (current.publicKey) throw new Error('Notice keys already exist on another browser. Use that browser to read notices; keys cannot be recovered by the server.');
+  try {
+    const signing = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);
+    const exchange = await crypto.subtle.generateKey({ name: 'X25519' }, true, ['deriveBits']);
+    const keys = {
+      publicKey: {
+        ed25519: bytesToB64(await crypto.subtle.exportKey('spki', signing.publicKey)),
+        x25519: bytesToB64(await crypto.subtle.exportKey('spki', exchange.publicKey)),
+      },
+      signingPrivateKey: bytesToB64(await crypto.subtle.exportKey('pkcs8', signing.privateKey)),
+      exchangePrivateKey: bytesToB64(await crypto.subtle.exportKey('pkcs8', exchange.privateKey)),
+    };
+    await api('POST', '/notices/keys/register', { publicKey: JSON.stringify(keys.publicKey) });
+    localStorage.setItem(storageKey, JSON.stringify(keys));
+    return keys;
+  } catch (e) {
+    if ((e?.message || '').includes('not supported')) throw new Error('This browser does not support X25519/Ed25519 Web Crypto. Use a current HTTPS browser.');
+    throw e;
+  }
+}
+
+async function deriveNoticeAesKey(sharedSecret) {
+  const material = await crypto.subtle.importKey('raw', sharedSecret, 'HKDF', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(), info: new TextEncoder().encode('pfx-notice-e2ee') },
+    material, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'],
+  );
+}
+
+async function encryptNoticeForRecipient(plaintext, publicBundle) {
+  const recipient = JSON.parse(publicBundle);
+  const recipientKey = await crypto.subtle.importKey('spki', b64ToBytes(recipient.x25519), { name: 'X25519' }, false, []);
+  const ephemeral = await crypto.subtle.generateKey({ name: 'X25519' }, true, ['deriveBits']);
+  const secret = await crypto.subtle.deriveBits({ name: 'X25519', public: recipientKey }, ephemeral.privateKey, 256);
+  const key = await deriveNoticeAesKey(secret);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(plaintext));
+  const envelope = {
+    alg: 'X25519-AES256GCM',
+    ephemPk: bytesToB64(await crypto.subtle.exportKey('spki', ephemeral.publicKey)),
+    iv: bytesToB64(iv),
+    data: bytesToB64(ciphertext),
+  };
+  return bytesToB64(new TextEncoder().encode(JSON.stringify(envelope)));
+}
+
+async function signNoticeMessage(userId, message) {
+  const keys = await ensureNoticeKeys(userId);
+  const privateKey = await crypto.subtle.importKey('pkcs8', b64ToBytes(keys.signingPrivateKey), { name: 'Ed25519' }, false, ['sign']);
+  return bytesToB64(await crypto.subtle.sign('Ed25519', privateKey, new TextEncoder().encode(message)));
+}
+
+async function decryptNoticeForUser(userId, envelopeBase64) {
+  const keys = await ensureNoticeKeys(userId);
+  const envelope = JSON.parse(new TextDecoder().decode(b64ToBytes(envelopeBase64)));
+  if (envelope.alg !== 'X25519-AES256GCM') throw new Error('Unsupported encrypted notice format');
+  const privateKey = await crypto.subtle.importKey('pkcs8', b64ToBytes(keys.exchangePrivateKey), { name: 'X25519' }, false, ['deriveBits']);
+  const ephemeralKey = await crypto.subtle.importKey('spki', b64ToBytes(envelope.ephemPk), { name: 'X25519' }, false, []);
+  const secret = await crypto.subtle.deriveBits({ name: 'X25519', public: ephemeralKey }, privateKey, 256);
+  const key = await deriveNoticeAesKey(secret);
+  const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64ToBytes(envelope.iv) }, key, b64ToBytes(envelope.data));
+  return new TextDecoder().decode(plaintext);
+}
+
 async function viewNotices() {
   const notices = await api('GET', '/notices');
+  let keyWarning = '';
+  try { await ensureNoticeKeys(S.user.id); }
+  catch (e) { keyWarning = `<div class="panel" style="border-color:var(--warn);margin-bottom:10px"><b>Secure notice key unavailable</b><div class="muted" style="font-size:12px">${esc(e.message)}</div></div>`; }
   tabActions(isCPO() || isCEO() ? '<button class="btn primary" onclick="uiNoticeDispatch()">Dispatch notice</button>' : '');
-  C().innerHTML = notices.map((n) => `<div class="list-item"><div class="top">
+  C().innerHTML = `${keyWarning}${notices.map((n) => `<div class="list-item"><div class="top">
     <div><b>${esc(n.title)}</b> ${badge(n.category, n.category === 'DISCIPLINARY' ? 'b-red' : 'b-blue')}</div>
     <div class="row">${statusBadge(n.status)}
       ${n.status !== 'ACKNOWLEDGED' ? `<button class="btn good sm" onclick="uiAck('${n.id}')">Acknowledge</button>` : ''}
-      <button class="btn sm" onclick="uiDecrypt('${esc(n.encryptedContent)}')">Decrypt</button>
+      <button class="btn sm" onclick="uiDecrypt('${esc(n.encryptedContent)}','${S.user.id}')">Decrypt</button>
     </div></div>
     <div class="muted" style="font-size:12px;margin-top:4px">From ${esc(n.sender?.fullName || '')} · ${dt(n.createdAt)}</div>
-  </div>`).join('') || '<div class="panel empty">Inbox empty</div>';
+  </div>`).join('') || '<div class="panel empty">Inbox empty</div>'}`;
 }
 
 function uiAck(id) {
@@ -2513,23 +2601,13 @@ function uiAck(id) {
   ], 'Sign', (d) => act('POST', `/notices/${id}/acknowledge`, d));
 }
 
-function uiDecrypt(cipher) {
-  let text = cipher;
+async function uiDecrypt(cipher, userId = S.user.id) {
   try {
-    const raw = atob(cipher);
-    try {
-      const env = JSON.parse(raw);
-      if (env.alg === 'X25519-AES256GCM') {
-        text = `[E2EE Ciphertext Decrypted: ${env.alg}]\nPayload: ${atob(env.data)}\nIV: ${env.iv}\nTag: ${env.tag}`;
-      } else {
-        text = raw;
-      }
-    } catch {
-      text = raw;
-    }
-  } catch { /* not base64 */ }
-  openModal('Decrypted notice (client-side)', `<div style="padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);white-space:pre-wrap">${esc(text)}</div>
-    <div class="modal-actions"><button class="btn" onclick="closeModal()">Close</button></div>`);
+    const text = await decryptNoticeForUser(userId, cipher);
+    openModal('Decrypted notice (client-side only)', `<div style="padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);white-space:pre-wrap">${esc(text)}</div>
+      <div class="muted" style="font-size:11px;margin-top:8px">Decrypted locally. The plaintext is not sent to the server.</div>
+      <div class="modal-actions"><button class="btn" onclick="closeModal()">Close</button></div>`);
+  } catch (e) { toast(`Cannot decrypt notice: ${e.message}`, false); }
 }
 
 async function uiNoticeDispatch() {
@@ -2540,19 +2618,18 @@ async function uiNoticeDispatch() {
     { name: 'category', label: 'Category', type: 'select', options: ['DISCIPLINARY', 'APPOINTMENT', 'ORGANIZATIONAL', 'STUDIO_DIRECTIVE'].map((c) => ({ value: c, label: c })) },
     { name: 'title', label: 'Title', required: true, value: 'Disciplinary citation' },
     { name: 'message', label: 'Message (E2EE encrypted with recipient key)', type: 'textarea', required: true, value: 'Your lab attendance and commit activity require immediate improvement.' },
-  ], 'Encrypt & dispatch', (d) => {
+  ], 'Encrypt & dispatch', async (d) => {
     const { message, ...rest } = d;
-    const envelope = {
-      alg: 'X25519-AES256GCM',
-      ephemPk: btoa('x25519-ephem-key-' + Date.now()),
-      iv: btoa('iv-' + Math.random().toString(36).slice(2)),
-      tag: btoa('tag-' + Math.random().toString(36).slice(2)),
-      data: btoa(unescape(encodeURIComponent(message))),
-    };
+    await ensureNoticeKeys(S.user.id);
+    const recipient = await api('GET', `/notices/keys/${d.recipientId}`);
+    if (!recipient.publicKey) throw new Error('Recipient must open Notices once to create their private keys before you can send a secure notice');
+    const encryptedContent = await encryptNoticeForRecipient(message, recipient.publicKey);
+    const signatureMessage = JSON.stringify([d.recipientId, d.title, d.category, encryptedContent]);
+    const signature = await signNoticeMessage(S.user.id, signatureMessage);
     return act('POST', '/notices', {
       ...rest,
-      encryptedContent: btoa(JSON.stringify(envelope)),
-      signature: btoa('ed25519-sig-' + S.user.id + '-' + Date.now()),
+      encryptedContent,
+      signature,
     });
   });
 }
