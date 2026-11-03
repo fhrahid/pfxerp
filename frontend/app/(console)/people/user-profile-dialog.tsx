@@ -273,7 +273,6 @@ function UserProfileDetail({ data }: { data: any }) {
                     <TableHead>Task Title</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Priority</TableHead>
-                    <TableHead>SP</TableHead>
                     <TableHead>Due Date</TableHead>
                     <TableHead>Git PR / Commit</TableHead>
                     <TableHead>Review / Critique</TableHead>
@@ -317,9 +316,6 @@ function UserProfileDetail({ data }: { data: any }) {
                           >
                             {t.priority}
                           </Badge>
-                        </TableCell>
-                        <TableCell className="font-mono text-xs font-semibold">
-                          {t.storyPoints} SP
                         </TableCell>
                         <TableCell className="text-xs">
                           {t.dueDate ? (

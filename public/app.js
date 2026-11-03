@@ -608,7 +608,6 @@ async function viewKanban() {
         <div class="kcard" draggable="true" ondragstart="kDragStart(event, '${t.id}')" ondragend="kDragEnd(event)" onclick="uiTaskDetail('${t.id}')">
           <div class="t">${esc(t.title)}</div>
           <div class="m">
-            <span class="badge-sp">${t.storyPoints ? t.storyPoints + ' SP' : '—'}</span>
             <span class="badge-prio prio-${esc(t.priority)}">${esc(t.priority)}</span>
             ${t.gitPrUrl ? '<span title="Git PR Verified" style="color:var(--accent2);font-weight:700;">● PR</span>' : ''}
             ${isMissed ? '<span class="badge b-red" style="font-weight:bold;margin-left:4px">MISSED DEADLINE</span>' : ''}
@@ -763,20 +762,14 @@ async function uiTaskCreate(squadId) {
         <label>Description</label>
         <textarea id="tcDesc" name="description" rows="3" placeholder="Task description and acceptance criteria"></textarea>
       </div>
-      <div class="fieldrow">
-        <div class="field">
-          <label>Story Points (1-13)</label>
-          <input type="number" id="tcPoints" name="storyPoints" min="1" max="13" value="1" required>
-        </div>
-        <div class="field">
-          <label>Priority</label>
-          <select id="tcPriority" name="priority">
-            <option value="LOW">LOW</option>
-            <option value="MEDIUM" selected>MEDIUM</option>
-            <option value="HIGH">HIGH</option>
-            <option value="CRITICAL">CRITICAL</option>
-          </select>
-        </div>
+      <div class="field">
+        <label>Priority</label>
+        <select id="tcPriority" name="priority">
+          <option value="LOW">LOW</option>
+          <option value="MEDIUM" selected>MEDIUM</option>
+          <option value="HIGH">HIGH</option>
+          <option value="CRITICAL">CRITICAL</option>
+        </select>
       </div>
       <div class="field">
         <label>Assignees (multiple allowed — none for backlog)</label>
@@ -805,7 +798,6 @@ async function uiTaskCreate(squadId) {
       squadId: document.getElementById('tcSquad')?.value,
       title: document.getElementById('tcTitle')?.value,
       description: document.getElementById('tcDesc')?.value || undefined,
-      storyPoints: +(document.getElementById('tcPoints')?.value || 1),
       priority: document.getElementById('tcPriority')?.value || 'MEDIUM',
       assigneeIds: [...document.querySelectorAll('.tcAssignee:checked')].map((el) => el.value),
       dueDate: dueVal ? new Date(dueVal).toISOString() : undefined,
@@ -875,7 +867,7 @@ async function uiTaskDetail(id) {
   }
 
   openModal(t.title, `
-    <div class="pillrow" style="margin-bottom:10px">${statusBadge(t.status)} ${badge(t.priority, t.priority === 'CRITICAL' ? 'b-red' : 'b-gray')} ${badge(t.storyPoints + ' pts', 'b-blue')} ${deadlineBadge}</div>
+    <div class="pillrow" style="margin-bottom:10px">${statusBadge(t.status)} ${badge(t.priority, t.priority === 'CRITICAL' ? 'b-red' : 'b-gray')} ${deadlineBadge}</div>
     <p class="muted">${esc(t.description || 'No description')}</p>
     <table>
       <tr><td>Assignees</td><td>${(t.assigneeNames || []).length ? esc(t.assigneeNames.map((a) => a.fullName).join(', ')) : esc(t.assignedTo?.fullName || '—')}</td></tr>
@@ -919,20 +911,14 @@ async function uiTaskEdit(taskId) {
         <label>Description</label>
         <textarea id="teDesc" name="description" rows="3">${esc(t.description || '')}</textarea>
       </div>
-      <div class="fieldrow">
-        <div class="field">
-          <label>Story Points (1-13)</label>
-          <input type="number" id="tePoints" name="storyPoints" min="1" max="13" value="${t.storyPoints || 1}" required>
-        </div>
-        <div class="field">
-          <label>Priority</label>
-          <select id="tePriority" name="priority">
-            <option value="LOW" ${t.priority === 'LOW' ? 'selected' : ''}>LOW</option>
-            <option value="MEDIUM" ${t.priority === 'MEDIUM' ? 'selected' : ''}>MEDIUM</option>
-            <option value="HIGH" ${t.priority === 'HIGH' ? 'selected' : ''}>HIGH</option>
-            <option value="CRITICAL" ${t.priority === 'CRITICAL' ? 'selected' : ''}>CRITICAL</option>
-          </select>
-        </div>
+      <div class="field">
+        <label>Priority</label>
+        <select id="tePriority" name="priority">
+          <option value="LOW" ${t.priority === 'LOW' ? 'selected' : ''}>LOW</option>
+          <option value="MEDIUM" ${t.priority === 'MEDIUM' ? 'selected' : ''}>MEDIUM</option>
+          <option value="HIGH" ${t.priority === 'HIGH' ? 'selected' : ''}>HIGH</option>
+          <option value="CRITICAL" ${t.priority === 'CRITICAL' ? 'selected' : ''}>CRITICAL</option>
+        </select>
       </div>
       <div class="field">
         <label>Assignees (multiple allowed — none for backlog)</label>
@@ -960,7 +946,6 @@ async function uiTaskEdit(taskId) {
     const payload = {
       title: document.getElementById('teTitle')?.value,
       description: document.getElementById('teDesc')?.value,
-      storyPoints: +(document.getElementById('tePoints')?.value || 1),
       priority: document.getElementById('tePriority')?.value,
       assigneeIds,
       dueDate: dueVal ? new Date(dueVal).toISOString() : null,
@@ -1159,7 +1144,14 @@ async function uiSquadDetail(id) {
   const s = await api('GET', '/squads/' + id);
   let addable = [];
   if (canManage()) {
-    try { addable = (await api('GET', '/users')).filter((u) => !(s.members || []).some((m) => m.userId === u.id)); } catch { addable = []; }
+    try {
+      addable = (await api('GET', '/users')).filter(
+        (u) =>
+          !['CEO', 'CFO', 'CTO', 'CPO'].includes(u.role) && // no C-level execs
+          !(u.squadMemberships || []).some((m) => m.squad) && // only unassigned people
+          !(s.members || []).some((m) => m.userId === u.id),
+      );
+    } catch { addable = []; }
   }
   openModal('Squad · ' + esc(s.name), `
     <div class="pillrow" style="margin-bottom:10px">${statusBadge(s.healthStatus)} ${s.isActive === false ? badge('inactive', 'b-red') : ''} <span class="badge b-gold">${money(s.balance)}</span> <span class="badge b-blue">valuation ${money(s.valuation)}</span></div>
@@ -1176,11 +1168,26 @@ async function uiSquadDetail(id) {
 function uiAddMember(squadId) {
   api('GET', '/users').then((users) => {
     const squad = S.squads.find((s) => s.id === squadId);
+    // Only unassigned, non-executive members are eligible for squad placement.
+    const unassigned = users.filter(
+      (u) => !['CEO', 'CFO', 'CTO', 'CPO'].includes(u.role) && !(u.squadMemberships || []).some((m) => m.squad),
+    );
     formModal('Add member to ' + (squad?.name || 'squad'), [
-      { name: 'userId', label: 'User', type: 'select', required: true, options: users.map((u) => ({ value: u.id, label: `${u.fullName} (${u.role})` })) },
+      {
+        name: 'userId',
+        label: 'Unassigned member',
+        type: 'select',
+        required: true,
+        options: unassigned.length
+          ? unassigned.map((u) => ({ value: u.id, label: `${u.fullName} (${u.role})` }))
+          : [{ value: '', label: '— no unassigned members —' }],
+      },
       { name: 'role', label: 'Squad role', type: 'select', options: [{ value: 'DEVELOPER', label: 'DEVELOPER' }, { value: 'PM', label: 'PM (allocation must be 1.0)' }] },
       { name: 'allocation', label: 'Allocation (0.01–1.0)', type: 'number', value: 1, step: '0.01' },
-    ], 'Add member', (d) => act('POST', `/squads/${squadId}/members`, { userId: d.userId, role: d.role, allocation: +d.allocation }));
+    ], 'Add member', (d) => {
+      if (!d.userId) throw new Error('No unassigned member selected');
+      return act('POST', `/squads/${squadId}/members`, { userId: d.userId, role: d.role, allocation: +d.allocation });
+    });
   });
 }
 
@@ -1396,7 +1403,7 @@ async function uiUserProfile(userId) {
         <h4 style="margin:0 0 8px;">Assigned Tasks & Deadlines (${assignedTasks.length})</h4>
         <div style="max-height:240px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;">
           <table>
-            <tr><th>Title</th><th>Status</th><th>Priority</th><th>Points</th><th>Due Date</th><th>Git PR / Commit</th></tr>
+            <tr><th>Title</th><th>Status</th><th>Priority</th><th>Due Date</th><th>Git PR / Commit</th></tr>
             ${assignedTasks.map((t) => {
               const m = missedMap.get(t.id);
               const isOverdueNow = t.dueDate && !['CTO_VERIFIED', 'CLOSED'].includes(t.status) && new Date(t.dueDate) < new Date();
@@ -1410,11 +1417,10 @@ async function uiUserProfile(userId) {
                 </td>
                 <td>${statusBadge(t.status)}</td>
                 <td>${badge(t.priority, t.priority === 'CRITICAL' ? 'b-red' : 'b-gray')}</td>
-                <td>${t.storyPoints || 1} SP</td>
                 <td style="${showMissed ? 'color:var(--danger);font-weight:bold;' : ''}">${t.dueDate ? dt(t.dueDate) : '—'}</td>
                 <td class="mono" style="font-size:11px;">${esc(t.gitPrUrl || t.gitCommitHash || '—')}</td>
               </tr>`;
-            }).join('') || '<tr><td colspan="6" class="muted" style="padding:12px;text-align:center;">No assigned tasks</td></tr>'}
+            }).join('') || '<tr><td colspan="5" class="muted" style="padding:12px;text-align:center;">No assigned tasks</td></tr>'}
           </table>
         </div>
       </div>

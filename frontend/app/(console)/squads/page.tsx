@@ -149,8 +149,7 @@ export default function SquadsPage() {
   );
 }
 
-function SquadDetailButton({ squadId }: { squadId: string }) {
-  const detail = useQuery({
+function SquadDetailButton({ squadId }: { squadId: string }) {  const detail = useQuery({
     queryKey: ["squad", squadId],
     queryFn: () => api<any>("GET", `/squads/${squadId}`),
     enabled: false,
@@ -230,21 +229,7 @@ function SquadDetailButton({ squadId }: { squadId: string }) {
                 </Table>
                 {manage ? (
                   <div className="mt-4">
-                    <FormDialog
-                      trigger={<Button size="sm" variant="outline" className="gap-1.5"><UserPlus className="h-4 w-4" /> Add member</Button>}
-                      title={`Add member to ${detail.data.name}`}
-                      fields={[
-                        { name: "userId", label: "User ID (copy from People)", required: true, hint: "mono" },
-                        { name: "role", label: "Squad role", type: "select", options: [{ value: "DEVELOPER", label: "DEVELOPER" }, { value: "PM", label: "PM (allocation 1.0)" }] },
-                        { name: "allocation", label: "Allocation", type: "number", value: 1, step: 0.01, min: 0.01, max: 1 },
-                      ]}
-                      submitLabel="Add member"
-                      onSubmit={async (d) => {
-                        await api("POST", `/squads/${squadId}/members`, { userId: d.userId, role: d.role, allocation: Number(d.allocation) });
-                        detail.refetch();
-                        qc.invalidateQueries({ queryKey: ["squads"] });
-                      }}
-                    />
+                    <AddMemberForm squadId={squadId} squadName={detail.data.name} onAdded={() => { detail.refetch(); qc.invalidateQueries({ queryKey: ["squads"] }); }} />
                   </div>
                 ) : null}
               </>
@@ -260,6 +245,34 @@ function SquadDetailButton({ squadId }: { squadId: string }) {
 }
 
 /* ------------------------------ GitHub ------------------------------ */
+
+/** Add-member form offering only unassigned, non-executive users. */
+function AddMemberForm({ squadId, squadName, onAdded }: { squadId: string; squadName: string; onAdded: () => void }) {
+  const users = useQuery({ queryKey: ["users"], queryFn: () => api<any[]>("GET", "/users") });
+  const unassigned = (users.data || [])
+    .filter((u: any) => !["CEO", "CFO", "CTO", "CPO"].includes(u.role))
+    .filter((u: any) => !(u.squadMemberships || []).some((m: any) => m.squad))
+    .map((u: any) => ({ value: u.id, label: `${u.fullName} (${u.role})` }));
+
+  return (
+    <FormDialog
+      trigger={<Button size="sm" variant="outline" className="gap-1.5"><UserPlus className="h-4 w-4" /> Add member</Button>}
+      title={`Add member to ${squadName}`}
+      description={unassigned.length ? "Only unassigned members are listed." : "Everyone is already in a squad (or an executive)."}
+      fields={[
+        { name: "userId", label: "Unassigned member", type: "select", options: unassigned, required: unassigned.length > 0 },
+        { name: "role", label: "Squad role", type: "select", options: [{ value: "DEVELOPER", label: "DEVELOPER" }, { value: "PM", label: "PM (allocation 1.0)" }] },
+        { name: "allocation", label: "Allocation", type: "number", value: 1, step: 0.01, min: 0.01, max: 1 },
+      ]}
+      submitLabel="Add member"
+      onSubmit={async (d) => {
+        if (!d.userId) throw new Error("No unassigned member selected");
+        await api("POST", `/squads/${squadId}/members`, { userId: d.userId, role: d.role, allocation: Number(d.allocation) });
+        onAdded();
+      }}
+    />
+  );
+}
 
 function GitButton({ squadId, name }: { squadId: string; name: string }) {
   const [open, setOpen] = React.useState(false);
