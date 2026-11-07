@@ -1,0 +1,9 @@
+# Use case phase handoff
+
+**Status:** drafted 2026-11-07, then amended for ABAC grant administration and the current CPO perspective. Seven editable PlantUML sources are in `../diagrams/use-cases/`; 70 use case descriptions are split across seven domain files and linked from `use-case-descriptions.md`. `use-case-index.md` maps all 75 functional requirements to a use case or an explicit non-interactive classification. No `include` or `extend` relationship was inferred from mere workflow sequence.
+
+Actor permissions were checked against the source-level `../access/rbac-matrix.md`. CHRO payroll review/approval is target-only; current CPO/CEO approval combines decision and disbursement. All target service/action grants remain distinct from job titles under `../access/service-access-policy.md`. A diagram association represents a goal or current source access as described in the case; it is not an approved target grant.
+
+Static checks found unique case IDs, all required description fields, valid diagram references and complete functional-requirement coverage. **Later rendering check (2026-11-07):** all seven `.puml` sources rendered to SVG and PNG with PlantUML 1.2026.9 using the Smetana layout; the overall and six perspective images were visually inspected. The overall map is tall, so zoom or SVG preview is useful. The VS Code PlantUML Local extension v0.21.0 was installed for interactive preview. The installed repository documentation skill was read; its `technical-writing` prerequisite and a UML-specific skill are not installed. No application code or runtime behavior was changed.
+
+Open decisions: grant-administrator bootstrap and grant scopes, CHRO payroll executor/rejector, CEO override, client acceptance proof, target read/export policy and the CPO target action split. The CPO document and diagram show current source actions without assigning target grants.

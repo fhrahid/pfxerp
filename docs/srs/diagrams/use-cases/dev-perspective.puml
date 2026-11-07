@@ -1,0 +1,42 @@
+@startuml
+title Pointfex ERP — Developer perspective
+left to right direction
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam usecaseBackgroundColor #F7FAFC
+skinparam usecaseBorderColor #40566B
+
+actor "CTO" as CTO
+actor "Developer" as DEV
+actor "PM" as PM
+actor "User / account holder" as USER
+
+rectangle "ERP services" {
+  usecase "UC-DEV-001\nRead assigned tasks" as UC_DEV_001
+  usecase "UC-DEV-002\nStart assigned task" as UC_DEV_002
+  usecase "UC-DEV-003\nSubmit code task evidence" as UC_DEV_003
+  usecase "UC-DEV-004\nSubmit non-code task evidence" as UC_DEV_004
+  usecase "UC-DEV-005\nReport cross-squad defect" as UC_DEV_005
+  usecase "UC-DEV-006\nApply for technical certification" as UC_DEV_006
+  usecase "UC-DEV-007\nComplete assigned consultancy" as UC_DEV_007
+  usecase "UC-SYS-017\nCreate marketplace listing" as UC_SYS_017
+  usecase "UC-SYS-022\nRead performance score" as UC_SYS_022
+  usecase "UC-PM-002\nReview submitted squad task" as UC_PM_002
+  usecase "UC-CTO-002\nPass task quality review" as UC_CTO_002
+}
+DEV --> UC_DEV_001
+DEV --> UC_DEV_002
+DEV --> UC_DEV_003
+DEV --> UC_DEV_004
+DEV --> UC_DEV_005
+DEV --> UC_DEV_006
+DEV --> UC_DEV_007
+USER --> UC_SYS_017
+USER --> UC_SYS_022
+PM --> UC_PM_002
+CTO --> UC_CTO_002
+note bottom of DEV
+  Current routes use RBAC. Target service grants
+  and approved resource scopes remain separate.
+end note
+@enduml

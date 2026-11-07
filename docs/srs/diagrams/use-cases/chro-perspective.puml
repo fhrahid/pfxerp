@@ -1,0 +1,29 @@
+@startuml
+title Pointfex ERP — CHRO perspective
+left to right direction
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam usecaseBackgroundColor #F7FAFC
+skinparam usecaseBorderColor #40566B
+
+actor "CHRO (target)" as CHRO
+actor "CPO (current)" as CPO
+actor "Payment executor (TBD)" as EXEC
+actor "PM" as PM
+
+rectangle "ERP services" {
+  usecase "UC-CHRO-001\nReview submitted payroll" as UC_CHRO_001
+  usecase "UC-CHRO-002\nApprove payroll proposal" as UC_CHRO_002
+  usecase "UC-SYS-007\nExecute approved payroll" as UC_SYS_007
+  usecase "UC-PM-005\nSubmit squad payroll" as UC_PM_005
+}
+CHRO --> UC_CHRO_001
+CHRO --> UC_CHRO_002
+EXEC --> UC_SYS_007
+CPO --> UC_SYS_007
+PM --> UC_PM_005
+note bottom of CHRO
+  Payroll approval is PLANNED. Current CPO/CEO
+  approval combines decision and disbursement.
+end note
+@enduml

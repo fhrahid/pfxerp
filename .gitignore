@@ -8,3 +8,4 @@ dist/
 .agents/
 skills-lock.json
 /plan
+.hermes/

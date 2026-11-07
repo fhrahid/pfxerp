@@ -1,0 +1,50 @@
+@startuml
+title Pointfex ERP — CFO perspective
+left to right direction
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam usecaseBackgroundColor #F7FAFC
+skinparam usecaseBorderColor #40566B
+
+actor "Board member" as BOARD
+actor "CEO" as CEO
+actor "CFO" as CFO
+actor "PM" as PM
+actor "User / account holder" as USER
+
+rectangle "ERP services" {
+  usecase "UC-CFO-001\nAllocate squad funds" as UC_CFO_001
+  usecase "UC-CFO-002\nAllocate personal funds" as UC_CFO_002
+  usecase "UC-CFO-003\nReturn squad funds" as UC_CFO_003
+  usecase "UC-CFO-004\nRequest pool funding" as UC_CFO_004
+  usecase "UC-CFO-005\nApprove fine proposal" as UC_CFO_005
+  usecase "UC-CFO-006\nSubmit sprint payout" as UC_CFO_006
+  usecase "UC-CFO-007\nExecute approved sprint payout" as UC_CFO_007
+  usecase "UC-CFO-008\nDisburse approved loan" as UC_CFO_008
+  usecase "UC-CFO-009\nInvest in squad equity" as UC_CFO_009
+  usecase "UC-SYS-008\nApprove sprint payout" as UC_SYS_008
+  usecase "UC-SYS-009\nDecide board proposal" as UC_SYS_009
+  usecase "UC-SYS-010\nView accounts and entries" as UC_SYS_010
+  usecase "UC-PM-006\nApply for squad loan" as UC_PM_006
+  usecase "UC-SYS-030\nRecalculate valuations" as UC_SYS_030
+}
+CFO --> UC_CFO_001
+CFO --> UC_CFO_002
+CFO --> UC_CFO_003
+CFO --> UC_CFO_004
+CFO --> UC_CFO_005
+CFO --> UC_CFO_006
+CFO --> UC_CFO_007
+CFO --> UC_CFO_008
+CFO --> UC_CFO_009
+CEO --> UC_SYS_008
+BOARD --> UC_SYS_009
+CEO --> UC_SYS_009
+USER --> UC_SYS_010
+PM --> UC_PM_006
+note bottom of CFO
+  Current routes use RBAC. Target service grants
+  and approved resource scopes remain separate.
+end note
+CFO --> UC_SYS_030
+@enduml
