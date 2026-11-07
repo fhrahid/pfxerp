@@ -1,0 +1,58 @@
+@startuml
+title Pointfex ERP — PM perspective
+left to right direction
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam usecaseBackgroundColor #F7FAFC
+skinparam usecaseBorderColor #40566B
+
+actor "CFO" as CFO
+actor "CHRO (target)" as CHRO
+actor "CTO" as CTO
+actor "Developer" as DEV
+actor "PM" as PM
+
+rectangle "ERP services" {
+  usecase "UC-PM-001\nCreate squad task" as UC_PM_001
+  usecase "UC-PM-002\nReview submitted squad task" as UC_PM_002
+  usecase "UC-PM-003\nReject submitted squad task" as UC_PM_003
+  usecase "UC-PM-004\nClose technically approved task" as UC_PM_004
+  usecase "UC-PM-005\nSubmit squad payroll" as UC_PM_005
+  usecase "UC-PM-006\nApply for squad loan" as UC_PM_006
+  usecase "UC-PM-007\nRepay squad loan" as UC_PM_007
+  usecase "UC-PM-008\nBook consultancy for squad" as UC_PM_008
+  usecase "UC-PM-009\nManage squad repositories" as UC_PM_009
+  usecase "UC-PM-010\nRecord internal milestone acceptance" as UC_PM_010
+  usecase "UC-SYS-018\nPurchase marketplace listing" as UC_SYS_018
+  usecase "UC-SYS-019\nCreate bounty target" as UC_SYS_019
+  usecase "UC-SYS-020\nCancel consultancy booking" as UC_SYS_020
+  usecase "UC-DEV-003\nSubmit code task evidence" as UC_DEV_003
+  usecase "UC-CTO-002\nPass task quality review" as UC_CTO_002
+  usecase "UC-CHRO-002\nApprove payroll proposal" as UC_CHRO_002
+  usecase "UC-CFO-008\nDisburse approved loan" as UC_CFO_008
+}
+PM --> UC_PM_001
+PM --> UC_PM_002
+PM --> UC_PM_003
+PM --> UC_PM_004
+PM --> UC_PM_005
+PM --> UC_PM_006
+PM --> UC_PM_007
+PM --> UC_PM_008
+PM --> UC_PM_009
+PM --> UC_PM_010
+PM --> UC_SYS_018
+CTO --> UC_SYS_018
+PM --> UC_SYS_019
+CTO --> UC_SYS_019
+PM --> UC_SYS_020
+CTO --> UC_SYS_020
+DEV --> UC_DEV_003
+CTO --> UC_CTO_002
+CHRO --> UC_CHRO_002
+CFO --> UC_CFO_008
+note bottom of PM
+  Current routes use RBAC. Target service grants
+  and approved resource scopes remain separate.
+end note
+@enduml

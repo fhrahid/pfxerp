@@ -1,0 +1,35 @@
+@startuml
+title Pointfex ERP — CPO current source perspective
+left to right direction
+skinparam packageStyle rectangle
+skinparam shadowing false
+
+actor "CPO (current source role)" as CPO
+rectangle "ERP current routes" {
+  usecase "UC-SYS-031\nManage worker account" as UC_SYS_031
+  usecase "UC-SYS-006\nMaintain squad membership" as UC_SYS_006
+  usecase "UC-SYS-021\nInvite worker" as UC_SYS_021
+  usecase "UC-SYS-007\nCurrent approve/disburse\n(target executor TBD)" as UC_SYS_007
+  usecase "UC-SYS-026\nReject payroll proposal" as UC_SYS_026
+  usecase "UC-SYS-015\nDispatch secure notice (sender step)" as UC_SYS_015
+  usecase "UC-SYS-028\nCreate product" as UC_SYS_028
+  usecase "UC-SYS-016\nClient/contract setup, escrow\n(no PM funding authority)" as UC_SYS_016
+  usecase "UC-PM-010\nInternal milestone acceptance\n(current CPO route)" as UC_PM_010
+  usecase "UC-SYS-009\nBoard proposal/vote step" as UC_SYS_009
+}
+CPO --> UC_SYS_031
+CPO --> UC_SYS_006
+CPO --> UC_SYS_021
+CPO --> UC_SYS_007
+CPO --> UC_SYS_026
+CPO --> UC_SYS_015
+CPO --> UC_SYS_028
+CPO --> UC_SYS_016
+CPO --> UC_PM_010
+CPO --> UC_SYS_009
+note bottom of CPO
+  Current role combines people and product actions.
+  Target CPO actions and ABAC grants are UNVERIFIED.
+  CHRO payroll approval is PLANNED separately.
+end note
+@enduml

@@ -1,0 +1,60 @@
+@startuml
+title Pointfex ERP — CTO perspective
+left to right direction
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam usecaseBackgroundColor #F7FAFC
+skinparam usecaseBorderColor #40566B
+
+actor "Board member" as BOARD
+actor "CEO" as CEO
+actor "CTO" as CTO
+actor "Developer" as DEV
+actor "PM" as PM
+actor "User / account holder" as USER
+
+rectangle "ERP services" {
+  usecase "UC-CTO-001\nRead technical review queue" as UC_CTO_001
+  usecase "UC-CTO-002\nPass task quality review" as UC_CTO_002
+  usecase "UC-CTO-003\nReject task quality review" as UC_CTO_003
+  usecase "UC-CTO-004\nReview certification application" as UC_CTO_004
+  usecase "UC-CTO-005\nTriage bounty report" as UC_CTO_005
+  usecase "UC-CTO-006\nVerify marketplace listing" as UC_CTO_006
+  usecase "UC-CTO-007\nAudit client milestone" as UC_CTO_007
+  usecase "UC-CTO-008\nIssue technical citation" as UC_CTO_008
+  usecase "UC-SYS-009\nDecide board proposal" as UC_SYS_009
+  usecase "UC-SYS-017\nCreate marketplace listing" as UC_SYS_017
+  usecase "UC-SYS-018\nPurchase marketplace listing" as UC_SYS_018
+  usecase "UC-SYS-019\nCreate bounty target" as UC_SYS_019
+  usecase "UC-SYS-020\nCancel consultancy booking" as UC_SYS_020
+  usecase "UC-PM-002\nReview submitted squad task" as UC_PM_002
+  usecase "UC-DEV-003\nSubmit code task evidence" as UC_DEV_003
+  usecase "UC-SYS-029\nDelist marketplace listing" as UC_SYS_029
+  usecase "UC-SYS-033\nView certification directory" as UC_SYS_033
+}
+CTO --> UC_CTO_001
+CTO --> UC_CTO_002
+CTO --> UC_CTO_003
+CTO --> UC_CTO_004
+CTO --> UC_CTO_005
+CTO --> UC_CTO_006
+CTO --> UC_CTO_007
+CTO --> UC_CTO_008
+BOARD --> UC_SYS_009
+CEO --> UC_SYS_009
+USER --> UC_SYS_017
+PM --> UC_SYS_018
+CTO --> UC_SYS_018
+PM --> UC_SYS_019
+CTO --> UC_SYS_019
+PM --> UC_SYS_020
+CTO --> UC_SYS_020
+PM --> UC_PM_002
+DEV --> UC_DEV_003
+note bottom of CTO
+  Current routes use RBAC. Target service grants
+  and approved resource scopes remain separate.
+end note
+CTO --> UC_SYS_029
+USER --> UC_SYS_033
+@enduml

@@ -1,0 +1,215 @@
+@startuml
+title Pointfex ERP — overall user-facing use cases
+left to right direction
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam usecaseBackgroundColor #F7FAFC
+skinparam usecaseBorderColor #40566B
+
+actor "CHRO (target)" as CHRO
+actor "CTO" as CTO
+actor "CFO" as CFO
+actor "PM" as PM
+actor "Developer" as DEV
+actor "CEO" as CEO
+actor "CPO (current)" as CPO
+actor "User / account holder" as USER
+actor "Invitee" as INV
+actor "Board member" as BOARD
+actor "Consultant" as CONS
+actor "Telemetry producer" as PROD
+actor "Payment executor (TBD)" as EXEC
+
+rectangle "ERP services" {
+  package "Identity" {
+    usecase "UC-SYS-001\nSign in" as UC_SYS_001
+    usecase "UC-SYS-002\nChange own password" as UC_SYS_002
+    usecase "UC-SYS-003\nReset password" as UC_SYS_003
+    usecase "UC-SYS-004\nAccept invitation" as UC_SYS_004
+    usecase "UC-SYS-005\nAssign descriptive job label" as UC_SYS_005
+    usecase "UC-SYS-006\nMaintain squad membership" as UC_SYS_006
+    usecase "UC-SYS-021\nInvite worker" as UC_SYS_021
+    usecase "UC-SYS-027\nManage own user profile" as UC_SYS_027
+    usecase "UC-SYS-031\nManage worker account" as UC_SYS_031
+    usecase "UC-SYS-034\nManage direct service grants" as UC_SYS_034
+  }
+  package "Work" {
+    usecase "UC-PM-001\nCreate squad task" as UC_PM_001
+    usecase "UC-PM-002\nReview submitted squad task" as UC_PM_002
+    usecase "UC-PM-003\nReject submitted squad task" as UC_PM_003
+    usecase "UC-PM-004\nClose technically approved task" as UC_PM_004
+    usecase "UC-DEV-001\nRead assigned tasks" as UC_DEV_001
+    usecase "UC-DEV-002\nStart assigned task" as UC_DEV_002
+    usecase "UC-DEV-003\nSubmit code task evidence" as UC_DEV_003
+    usecase "UC-DEV-004\nSubmit non-code task evidence" as UC_DEV_004
+  }
+  package "People" {
+    usecase "UC-CHRO-001\nReview submitted payroll" as UC_CHRO_001
+    usecase "UC-CHRO-002\nApprove payroll proposal" as UC_CHRO_002
+    usecase "UC-PM-005\nSubmit squad payroll" as UC_PM_005
+    usecase "UC-SYS-007\nExecute approved payroll" as UC_SYS_007
+    usecase "UC-SYS-025\nCreate fine proposal" as UC_SYS_025
+    usecase "UC-SYS-026\nReject payroll proposal" as UC_SYS_026
+  }
+  package "Finance" {
+    usecase "UC-CFO-001\nAllocate squad funds" as UC_CFO_001
+    usecase "UC-CFO-002\nAllocate personal funds" as UC_CFO_002
+    usecase "UC-CFO-003\nReturn squad funds" as UC_CFO_003
+    usecase "UC-CFO-004\nRequest pool funding" as UC_CFO_004
+    usecase "UC-CFO-005\nApprove fine proposal" as UC_CFO_005
+    usecase "UC-CFO-006\nSubmit sprint payout" as UC_CFO_006
+    usecase "UC-CFO-007\nExecute approved sprint payout" as UC_CFO_007
+    usecase "UC-CFO-008\nDisburse approved loan" as UC_CFO_008
+    usecase "UC-CFO-009\nInvest in squad equity" as UC_CFO_009
+    usecase "UC-PM-006\nApply for squad loan" as UC_PM_006
+    usecase "UC-PM-007\nRepay squad loan" as UC_PM_007
+    usecase "UC-SYS-008\nApprove sprint payout" as UC_SYS_008
+    usecase "UC-SYS-009\nDecide board proposal" as UC_SYS_009
+    usecase "UC-SYS-010\nView accounts and entries" as UC_SYS_010
+  }
+  package "Technical" {
+    usecase "UC-CTO-001\nRead technical review queue" as UC_CTO_001
+    usecase "UC-CTO-002\nPass task quality review" as UC_CTO_002
+    usecase "UC-CTO-003\nReject task quality review" as UC_CTO_003
+    usecase "UC-CTO-004\nReview certification application" as UC_CTO_004
+    usecase "UC-CTO-005\nTriage bounty report" as UC_CTO_005
+    usecase "UC-CTO-006\nVerify marketplace listing" as UC_CTO_006
+    usecase "UC-CTO-008\nIssue technical citation" as UC_CTO_008
+    usecase "UC-PM-008\nBook consultancy for squad" as UC_PM_008
+    usecase "UC-DEV-005\nReport cross-squad defect" as UC_DEV_005
+    usecase "UC-DEV-006\nApply for technical certification" as UC_DEV_006
+    usecase "UC-DEV-007\nComplete assigned consultancy" as UC_DEV_007
+    usecase "UC-SYS-017\nCreate marketplace listing" as UC_SYS_017
+    usecase "UC-SYS-018\nPurchase marketplace listing" as UC_SYS_018
+    usecase "UC-SYS-019\nCreate bounty target" as UC_SYS_019
+    usecase "UC-SYS-020\nCancel consultancy booking" as UC_SYS_020
+    usecase "UC-SYS-029\nDelist marketplace listing" as UC_SYS_029
+    usecase "UC-SYS-033\nView certification directory" as UC_SYS_033
+  }
+  package "Clients" {
+    usecase "UC-CTO-007\nAudit client milestone" as UC_CTO_007
+    usecase "UC-PM-010\nRecord internal milestone acceptance" as UC_PM_010
+    usecase "UC-SYS-016\nManage client contract and milestone" as UC_SYS_016
+  }
+  package "Operations" {
+    usecase "UC-PM-009\nManage squad repositories" as UC_PM_009
+    usecase "UC-SYS-011\nIngest product telemetry" as UC_SYS_011
+    usecase "UC-SYS-012\nView current sprint" as UC_SYS_012
+    usecase "UC-SYS-013\nView dashboard" as UC_SYS_013
+    usecase "UC-SYS-014\nSubscribe to event room" as UC_SYS_014
+    usecase "UC-SYS-015\nExchange secure notice" as UC_SYS_015
+    usecase "UC-SYS-022\nRead performance score" as UC_SYS_022
+    usecase "UC-SYS-023\nSet current sprint" as UC_SYS_023
+    usecase "UC-SYS-024\nResolve squad chaos event" as UC_SYS_024
+    usecase "UC-SYS-028\nCreate product" as UC_SYS_028
+    usecase "UC-SYS-030\nRecalculate valuations" as UC_SYS_030
+    usecase "UC-SYS-032\nManage system setting" as UC_SYS_032
+  }
+}
+CHRO --> UC_CHRO_001
+CHRO --> UC_CHRO_002
+CTO --> UC_CTO_001
+CTO --> UC_CTO_002
+CTO --> UC_CTO_003
+CTO --> UC_CTO_004
+CTO --> UC_CTO_005
+CTO --> UC_CTO_006
+CTO --> UC_CTO_007
+CTO --> UC_CTO_008
+CFO --> UC_CFO_001
+CFO --> UC_CFO_002
+CFO --> UC_CFO_003
+CFO --> UC_CFO_004
+CFO --> UC_CFO_005
+CFO --> UC_CFO_006
+CFO --> UC_CFO_007
+CFO --> UC_CFO_008
+CFO --> UC_CFO_009
+PM --> UC_PM_001
+PM --> UC_PM_002
+PM --> UC_PM_003
+PM --> UC_PM_004
+PM --> UC_PM_005
+PM --> UC_PM_006
+PM --> UC_PM_007
+PM --> UC_PM_008
+PM --> UC_PM_009
+PM --> UC_PM_010
+DEV --> UC_DEV_001
+DEV --> UC_DEV_002
+DEV --> UC_DEV_003
+DEV --> UC_DEV_004
+DEV --> UC_DEV_005
+DEV --> UC_DEV_006
+DEV --> UC_DEV_007
+USER --> UC_SYS_001
+USER --> UC_SYS_002
+USER --> UC_SYS_003
+INV --> UC_SYS_004
+CEO --> UC_SYS_005
+CEO --> UC_SYS_034
+CPO --> UC_SYS_006
+CEO --> UC_SYS_006
+EXEC --> UC_SYS_007
+CONS --> UC_DEV_007
+CEO --> UC_SYS_008
+BOARD --> UC_SYS_009 : propose/vote only
+CEO --> UC_SYS_009 : final decision only
+USER --> UC_SYS_010
+PROD --> UC_SYS_011
+USER --> UC_SYS_012
+USER --> UC_SYS_013
+CTO --> UC_SYS_013
+CFO --> UC_SYS_013
+CEO --> UC_SYS_013
+USER --> UC_SYS_014
+CPO --> UC_SYS_015
+USER --> UC_SYS_015
+CPO --> UC_SYS_016 : create/fund/assign steps
+CFO --> UC_SYS_016 : create/fund steps
+CEO --> UC_SYS_016 : create/fund/assign steps
+PM --> UC_SYS_016 : add/assign only
+USER --> UC_SYS_017
+PM --> UC_SYS_018
+CTO --> UC_SYS_018
+PM --> UC_SYS_019
+CTO --> UC_SYS_019
+PM --> UC_SYS_020
+CTO --> UC_SYS_020
+CFO --> UC_SYS_021
+CTO --> UC_SYS_021
+CPO --> UC_SYS_021
+CEO --> UC_SYS_021
+USER --> UC_SYS_022
+CFO --> UC_SYS_023
+CTO --> UC_SYS_023
+CPO --> UC_SYS_023
+CEO --> UC_SYS_023
+PM --> UC_SYS_024
+CEO --> UC_SYS_024
+CTO --> UC_SYS_025
+CPO --> UC_SYS_025
+CEO --> UC_SYS_025
+CPO --> UC_SYS_026
+CEO --> UC_SYS_026
+USER --> UC_SYS_027
+PM --> UC_SYS_028
+CTO --> UC_SYS_028
+CPO --> UC_SYS_028
+CEO --> UC_SYS_028
+
+note bottom of CHRO
+  Target-only actor; no CHRO current route.
+end note
+note bottom of EXEC
+  Payroll executor policy is UNVERIFIED.
+end note
+CTO --> UC_SYS_029
+CEO --> UC_SYS_029
+CFO --> UC_SYS_030
+CEO --> UC_SYS_030
+CPO --> UC_SYS_031
+CEO --> UC_SYS_031
+CEO --> UC_SYS_032
+USER --> UC_SYS_033
+@enduml
